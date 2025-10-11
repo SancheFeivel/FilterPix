@@ -44,16 +44,22 @@ class MainApp:
         self.detection_thread = None
         self.is_processing = False
         
+        # CREATE MANAGER ONCE during init to avoid freezing on button click
+        self.mp_manager = multiprocessing.Manager()
         self.sorter_cancel_flag = None
         self.detection_cancel_flag = None
         
+        self.star_enabled = True
         self.laplacian_enabled = True
         self.burst_enabled = True
-        self.img_detect_enabled = True
-        self.star_enabled = False
-        self.sharpness_level = 0
-        self.detection_mode = "accurate"
+        self.img_detect_enabled = False
         self.solo_detection = False
+        self.sharpness_level = 0
+        self.detection_mode = "fast"
+        
+        # Animation variables
+        self.dot_count = 0
+        self.animation_id = None
 
         self.home_frame = tk.Frame(self.root, bg="white")
         self.settings_frame = tk.Frame(self.root, bg="black")        
@@ -61,6 +67,31 @@ class MainApp:
         self.setup_homescreen()
         self.setup_settings()
         self.show_home()
+
+    # ===============================
+    # Animated Dots Helper
+    # ===============================
+    def animate_processing_dots(self):
+        """Animates the dots after 'Processing Images' text"""
+        if self.is_processing and self.animation_id is not None:
+            self.dot_count = (self.dot_count % 3) + 1
+            dots = "." * self.dot_count
+            self.canvas.itemconfig(self.processing_text, text=f"Processing Images{dots}")
+            self.animation_id = self.root.after(500, self.animate_processing_dots)
+    
+    def start_animation(self, text="Processing Images"):
+        """Start the animated dots"""
+        self.dot_count = 0
+        self.canvas.itemconfig(self.processing_text, text=text)
+        if self.animation_id:
+            self.root.after_cancel(self.animation_id)
+        self.animation_id = self.root.after(500, self.animate_processing_dots)
+    
+    def stop_animation(self):
+        """Stop the animated dots"""
+        if self.animation_id:
+            self.root.after_cancel(self.animation_id)
+            self.animation_id = None
 
     # ===============================
     # Frame Navigation
@@ -158,17 +189,14 @@ class MainApp:
             y_pos = table_top + (i * row_height)
             self.settings_canvas.create_line(table_left, y_pos, table_right, y_pos, fill="#555555", width=1)
 
-        # Row labels
-        self.settings_canvas.create_text(label_x, start_y, anchor="nw", text="Laplacian Sorting:", fill="#D9D9D9", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height, anchor="nw", text="Burst Grouping:", fill="#D9D9D9", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height * 2, anchor="nw", text="Sharpness Threshold:", fill="#D9D9D9", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height * 3, anchor="nw", text="Threshold Compensation:", fill="#D9D9D9", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height * 4, anchor="nw", text="Sort by Rating:", fill="#D9D9D9", font=("Inter", 18))
+        # Row labels - CORRECTED ORDER
+        self.settings_canvas.create_text(label_x, start_y, anchor="nw", text="Rating Filter:", fill="#D9D9D9", font=("Inter", 18))
+        self.settings_canvas.create_text(label_x, start_y + row_height, anchor="nw", text="Sharpness Filter:", fill="#D9D9D9", font=("Inter", 18))
+        self.settings_canvas.create_text(label_x, start_y + row_height * 2, anchor="nw", text="Burst Selection:", fill="#D9D9D9", font=("Inter", 18))
+        self.settings_canvas.create_text(label_x, start_y + row_height * 3, anchor="nw", text="Sharpness Threshold:", fill="#D9D9D9", font=("Inter", 18))
+        self.settings_canvas.create_text(label_x, start_y + row_height * 4, anchor="nw", text="Threshold Compensation:", fill="#D9D9D9", font=("Inter", 18))
         self.settings_canvas.create_text(label_x, start_y + row_height * 5, anchor="nw", text="Image Detection:", fill="#D9D9D9", font=("Inter", 18))
         self.settings_canvas.create_text(label_x, start_y + row_height * 6, anchor="nw", text="Detection Mode:", fill="#D9D9D9", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height * 7, anchor="nw", text="Feature 8:", fill="#666666", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height * 8, anchor="nw", text="Feature 9:", fill="#666666", font=("Inter", 18))
-        self.settings_canvas.create_text(label_x, start_y + row_height * 9, anchor="nw", text="Feature 10:", fill="#666666", font=("Inter", 18))
 
         # Load images
         self.low_image = PhotoImage(file=str(relative_to_assets("Low.png")))
@@ -186,54 +214,54 @@ class MainApp:
         self.fast_image = PhotoImage(file=str(relative_to_assets("Fast.png")))
         self.fast_image_active = PhotoImage(file=str(relative_to_assets("Fast1.png")))
 
-        # Row 1 Controls: Laplacian toggle
+        # Row 0 Controls: Rating Filter (Star rating toggle)
+        self.star_on = Button(self.settings_frame, image=self.on_image, borderwidth=0, highlightthickness=0,
+                            command=self.star_clicked, bg="#262827", relief="flat")
+        self.star_on.place(x=control_x, y=start_y - 1, width=60, height=21)
+
+        # Row 1 Controls: Sharpness Filter (Laplacian toggle)
         self.laplacian_on = Button(self.settings_frame, image=self.on_image, borderwidth=0, highlightthickness=0,
                                 command=self.laplacian_clicked, bg="#262827", relief="flat")
-        self.laplacian_on.place(x=control_x, y=start_y - 1, width=60, height=21)
+        self.laplacian_on.place(x=control_x, y=start_y + row_height - 1, width=60, height=21)
 
-        # Row 2 Controls: Burst grouping toggle 
+        # Row 2 Controls: Burst Selection (Burst grouping toggle)
         self.burst_on = Button(self.settings_frame, image=self.on_image, borderwidth=0, highlightthickness=0,
                             command=self.burst_clicked, bg="#262827", relief="flat")
-        self.burst_on.place(x=control_x, y=start_y + row_height - 1, width=60, height=21)
+        self.burst_on.place(x=control_x, y=start_y + row_height * 2 - 1, width=60, height=21)
 
-        # Row 3 Controls: Threshold buttons
+        # Row 3 Controls: Sharpness Threshold (Low/Med/High buttons)
         self.low_button = Button(self.settings_frame, image=self.low_image, borderwidth=0, highlightthickness=0,
                                 command=self.low_clicked, bg="#262827", relief="flat")
-        self.low_button.place(x=control_x, y=start_y + row_height * 2 - 1, width=60, height=21)
+        self.low_button.place(x=control_x, y=start_y + row_height * 3 - 1, width=60, height=21)
 
         self.med_button = Button(self.settings_frame, image=self.med_image_active, borderwidth=0, highlightthickness=0,
                                 command=self.med_clicked, bg="#262827", relief="flat")
-        self.med_button.place(x=control_x + 65, y=start_y + row_height * 2 - 1, width=60, height=21)
+        self.med_button.place(x=control_x + 65, y=start_y + row_height * 3 - 1, width=60, height=21)
 
         self.high_button = Button(self.settings_frame, image=self.high_image, borderwidth=0, highlightthickness=0,
                                 command=self.high_clicked, bg="#262827", relief="flat")
-        self.high_button.place(x=control_x + 130, y=start_y + row_height * 2 - 1, width=60, height=21)
+        self.high_button.place(x=control_x + 130, y=start_y + row_height * 3 - 1, width=60, height=21)
 
-        # Row 4 Controls: Threshold compensation entry
+        # Row 4 Controls: Threshold Compensation (Entry field)
         settings_entry_image_1 = PhotoImage(file=relative_to_assets("Threshold.png"))
-        self.settings_canvas.create_image(control_x + 30, start_y + row_height * 3 + 9, image=settings_entry_image_1)
+        self.settings_canvas.create_image(control_x + 30, start_y + row_height * 4 + 9, image=settings_entry_image_1)
 
         self.tolerance_comp = Entry(self.settings_frame, font=("Helvetica", 16), bd=0, bg="#1E1E1E", 
                                     fg="#D9D9D9", highlightthickness=0)
         self.tolerance_comp.image = settings_entry_image_1
-        self.tolerance_comp.place(x=control_x+2, y=start_y + row_height * 3 -1, width=54.0, height=21.0)
+        self.tolerance_comp.place(x=control_x+2, y=start_y + row_height * 4 -1, width=54.0, height=21.0)
         
-        # Row 5 Controls: Star rating toggle
-        self.star_on = Button(self.settings_frame, image=self.off_image, borderwidth=0, highlightthickness=0,
-                            command=self.star_clicked, bg="#262827", relief="flat")
-        self.star_on.place(x=control_x, y=start_y + row_height * 4 - 1, width=60, height=21)
-
-        # Row 6 Controls: Image detection toggle
-        self.img_detection_on = Button(self.settings_frame, image=self.on_image, borderwidth=0, highlightthickness=0,
+        # Row 5 Controls: Image Detection toggle
+        self.img_detection_on = Button(self.settings_frame, image=self.off_image, borderwidth=0, highlightthickness=0,
                                     command=self.img_detection_clicked, bg="#262827", relief="flat")
         self.img_detection_on.place(x=control_x, y=start_y + row_height * 5 - 1, width=60, height=21)
 
-        # Row 7 Controls: Detection mode buttons
-        self.accurate_button = Button(self.settings_frame, image=self.accurate_image_active, borderwidth=0, highlightthickness=0,
+        # Row 6 Controls: Detection Mode (Accurate/Fast buttons)
+        self.accurate_button = Button(self.settings_frame, image=self.accurate_image, borderwidth=0, highlightthickness=0,
                                     command=self.accurate_clicked, bg="#262827", relief="flat")
         self.accurate_button.place(x=control_x, y=start_y + row_height * 6 - 1, width=60, height=21)
 
-        self.fast_button = Button(self.settings_frame, image=self.fast_image, borderwidth=0, highlightthickness=0,
+        self.fast_button = Button(self.settings_frame, image=self.fast_image_active, borderwidth=0, highlightthickness=0,
                                 command=self.fast_clicked, bg="#262827", relief="flat")
         self.fast_button.place(x=control_x + 65, y=start_y + row_height * 6 - 1, width=60, height=21)
 
@@ -306,6 +334,7 @@ class MainApp:
     def cancel_clicked(self):
         if not self.is_processing:
             return
+        self.stop_animation()
         self.canvas.itemconfig(self.processing_text, text="Cancelling...")
         self.is_processing = False
         
@@ -358,7 +387,10 @@ class MainApp:
                 tolerance = 0
                 self.canvas.itemconfig(self.error_text_1, text="Invalid compensation value;")
                 self.canvas.itemconfig(self.error_text_2, text="using default of 0.")
-            
+        
+        # Use pre-created manager - much faster than creating new Manager()
+        self.sorter_cancel_flag = self.mp_manager.Value("b", False)
+        
         options = {
             "folder": folder,
             "base_blur": self.sharpness_level,
@@ -366,6 +398,7 @@ class MainApp:
             "use_starcheck": self.star_enabled,
             "use_laplaciancheck": self.laplacian_enabled,
             "group_bursts": self.burst_enabled,
+            "cancel_flag": self.sorter_cancel_flag,  # CRITICAL: Pass the cancel flag!
         }
 
         # Set up output box and redirect stdout
@@ -375,23 +408,25 @@ class MainApp:
         self.cancel_button.lift()
         
         # Check if we should skip sorting and go straight to detection
-        if not self.laplacian_enabled and not self.star_enabled and not self.burst_enabled :
-            self.canvas.itemconfig(self.processing_text, text="Skipping sorting - starting detection...")
+        if not self.laplacian_enabled and not self.star_enabled and not self.burst_enabled:
+            self.canvas.itemconfig(self.processing_text, text="Skipping Filtering - starting detection...")
             self.solo_detection = True
             self.root.after(100, self.start_detection)
             
         else:
-            # Start the normal sorting process
-            self.canvas.itemconfig(self.processing_text, text="Processing Images...")
+            # Start the normal sorting process with animated dots
+            self.start_animation("Processing Images")
             self.sorter_thread = threading.Thread(target=self.run_sorter, args=(options,))
             self.sorter_thread.daemon = True
             self.sorter_thread.start()
             self.root.after(100, self.check_sorter_done)
-
+            
     def check_sorter_done(self):
         if self.sorter_thread and self.sorter_thread.is_alive():
             self.root.after(100, self.check_sorter_done)
         else:
+            # Stop the animation
+            self.stop_animation()
             # Sorter is done, check if we need to run detection
             if self.img_detect_enabled and self.is_processing:  # Check is_processing in case cancelled
                 self.canvas.itemconfig(self.processing_text, text="Main Sorting Complete.")
@@ -405,8 +440,8 @@ class MainApp:
             
         self.canvas.itemconfig(self.processing_text, text="Starting image detection...")
         
-        # Create cancel flag for detection
-        self.detection_cancel_flag = multiprocessing.Manager().Value("b", False)
+        # Use pre-created manager
+        self.detection_cancel_flag = self.mp_manager.Value("b", False)
         
         detection_options = {
             "folder": self.entry_1.get().strip(),
@@ -430,6 +465,7 @@ class MainApp:
             self.finish_processing()
 
     def finish_processing(self):
+        self.stop_animation()
         self.is_processing = False
         self.canvas.itemconfig(self.processing_text, text="Process Complete.")
         self.button_1.lift()  # Show the start button again
