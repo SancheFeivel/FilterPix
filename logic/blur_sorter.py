@@ -51,11 +51,32 @@ class EXIFHelper:
 
 class ImageAnalyzer:
     @staticmethod
-    def crop_center(image, fraction=0.5):
+    def crop_center(image, fraction=0.75):
         h, w = image.shape[:2]
         ch, cw = int(h * fraction), int(w * fraction)
         y, x = (h - ch) // 2, (w - cw) // 2
         return image[y:y+ch, x:x+cw]
+
+    @staticmethod
+    def resize_short_side(image, target_short_side=683):
+        h, w = image.shape[:2]
+
+        # Determine scale factor based on shorter side
+        scale = target_short_side / min(h, w)
+
+        # Compute new dimensions
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    
+    @staticmethod
+    def resize_then_crop(image, target_short_side=683, fraction=0.75):
+        resized = ImageAnalyzer.resize_short_side(image, target_short_side)
+        cropped = ImageAnalyzer.crop_center(resized, fraction)
+        return cropped
+
+
 
     @staticmethod
     def is_sharp(image, path, base_blur, tolerance):
@@ -67,7 +88,7 @@ class ImageAnalyzer:
         shutter = EXIFHelper.get_shutter_speed(path)
 
         if fstop < 4 and iso < 2000:
-            threshold = 36
+            threshold = 30
         elif iso > 5000:
             threshold = 410
         elif iso > 2000 or (shutter and shutter <= 0.05):
@@ -89,145 +110,12 @@ def compute_laplacian_variance(image_path):
     image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if image is None:
         return 0.0
-    cropped = ImageAnalyzer.crop_center(image)
+    cropped = ImageAnalyzer.resize_then_crop(image, target_short_side=683, fraction=0.75)
     return cv2.Laplacian(cropped, cv2.CV_64F).var()
 
 
-def find_burst_groups(folder):
-    burst_groups = defaultdict(list)
-    for fname in os.listdir(folder):
-        if not fname.lower().endswith(".jpg"):
-            continue
-        fpath = os.path.join(folder, fname)
-        dt = EXIFHelper.get_datetime_original(fpath)
-        sub = EXIFHelper.get_subsec_time(fpath)
-        if dt:
-            key = dt  # Use only DateTimeOriginal to group bursts
-            burst_groups[key].append(fpath)
-    return {k: v for k, v in burst_groups.items() if len(v) > 1}
-
-
-class ImageSharpnessProcessor:
-    def __init__(self, folder, base_blur=0, tolerance=0):
-        self.folder = folder
-        self.base_blur = base_blur
-        self.tolerance = tolerance
-        self.cancel_flag = multiprocessing.Manager().Value("b", False)
-        self.progress_callback = None
-
-    def cancel(self):
-        self.cancel_flag.value = True
-        print("Cancellation requested...")
-
-    def run(self, use_starcheck=False, use_laplaciancheck=True, group_bursts=False, progress_callback=None):
-        
-        self.progress_callback = progress_callback
-        output_folder = os.path.join(self.folder, "Sharp")
-        os.makedirs(output_folder, exist_ok=True)
-
-        if self.cancel_flag.value:
-            print("Cancelled before any processing.")
-            return
-
-        if group_bursts:
-            print("Running in Burst Grouping...")
-            burst_groups = find_burst_groups(self.folder)
-
-            total_groups = len(burst_groups)
-            total_selected = 0
-
-            if self.cancel_flag.value:
-                print("Cancelled before processing burst groups.")
-                return
-
-            for key, group in burst_groups.items():
-                if self.cancel_flag.value:
-                    print("Cancelled during burst group processing.")
-                    return
-                scored = [(compute_laplacian_variance(p), p) for p in group]
-                scored.sort(reverse=True)
-                for _, path in scored[:2]:
-                    if self.cancel_flag.value:
-                        print("Cancelled during burst copying.")
-                        return
-                    shutil.copy(path, os.path.join(output_folder, os.path.basename(path)))
-                    total_selected += 1
-                    print(f"Copied from burst: {os.path.basename(path)}")
-
-            print("\nBurst grouping complete.")
-            print(f"Total burst groups found: {total_groups}")
-            print(f"Total images selected (sharpest from bursts): {total_selected}")
-            print(f"Output folder: {output_folder}")
-
-            if use_laplaciancheck:
-                print("Running Laplacian check on burst-selected images...")
-                burst_output_images = [f for f in os.listdir(output_folder) if f.lower().endswith(".jpg")]
-                burst_output_paths = [os.path.join(output_folder, f) for f in burst_output_images]
-
-                removed = 0
-                kept = 0
-                for path in burst_output_paths:
-                    image = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-                    if image is None:
-                        continue
-                    is_sharp, laplacian = ImageAnalyzer.is_sharp(image, path, self.base_blur, self.tolerance)
-                    if not is_sharp:
-                        os.remove(path)
-                        removed += 1
-                        print(f"Removed blurry burst image: {os.path.basename(path)}")
-                    else:
-                        kept += 1
-                        print(f"Kept sharp burst image: {os.path.basename(path)}")
-                print(f"Laplacian check on burst output complete. Kept: {kept}, Removed: {removed}")
-
-            return  # Exit after burst + laplacian-on-burst logic
-
-        if use_laplaciancheck:
-            print("Running in Laplacian Sharpness Mode on ALL images...")
-
-            images = [f for f in os.listdir(self.folder) if f.lower().endswith(".jpg")]
-            print(f"Found {len(images)} JPG files to process")
-            
-            if not images:
-                print("No JPG files found.")
-                return
-
-            args = [
-                (self.folder, f, output_folder, self.base_blur, self.tolerance, use_starcheck, use_laplaciancheck)
-                for f in images
-            ]
-            pool_size = max(1, multiprocessing.cpu_count() - 2)
-
-            with multiprocessing.Pool(pool_size) as pool:
-                result_async = pool.starmap_async(process_image_static, args)
-
-                while not result_async.ready():
-                    if self.cancel_flag.value:
-                        pool.terminate()
-                        pool.join()
-                        print("Cancelled.")
-                        return
-                    if self.progress_callback:
-                        self.progress_callback("Processing...")
-                    time.sleep(0.1)
-
-                results = result_async.get()
-
-            sharp = sum(1 for r in results if r and r[1])
-            blurry = sum(1 for r in results if r and not r[1])
-
-            print(f"\nLaplacian processing complete.")
-            print(f"Sharp: {sharp}")
-            print(f"Blurry: {blurry}")
-            print(f"Total processed: {len([r for r in results if r])}")
-            print(f"Output folder: {output_folder}")
-            return
-
-        print("No processing enabled. Please enable either burst grouping or Laplacian check.")
-
-
-
-def process_image_static(folder, filename, output_folder, base_blur, tolerance, use_starcheck, use_laplacian):
+def process_image_sharpness(folder, filename, base_blur, tolerance):
+    """Process single image for sharpness check"""
     if not filename.lower().endswith(".jpg"):
         return None
 
@@ -239,27 +127,260 @@ def process_image_static(folder, filename, output_folder, base_blur, tolerance, 
             print(f"Failed to read {filename}")
             return None
 
-        if use_starcheck and EXIFHelper.get_rating(path) != "0":
-            return filename, True, None
+        is_sharp, laplacian = ImageAnalyzer.is_sharp(image, path, base_blur, tolerance)
+        return filename, is_sharp, laplacian
 
-        if use_laplacian:
-            is_sharp, laplacian = ImageAnalyzer.is_sharp(image, path, base_blur, tolerance)
-            if is_sharp:
-                shutil.copy(path, os.path.join(output_folder, filename))
-            return filename, is_sharp, laplacian
-
+    except Exception as e:
+        print(f"Error processing {filename}: {e}")
+        return None
     finally:
-        del image
+        if 'image' in locals():
+            del image
         cv2.destroyAllWindows()
 
-    return None
+
+class ImageSharpnessProcessor:
+    def __init__(self, folder, base_blur=0, tolerance=0, burst_count=2):
+        self.folder = folder
+        self.base_blur = base_blur
+        self.tolerance = tolerance
+        self.burst_count = burst_count  # Configurable burst selection count
+        self.cancel_flag = multiprocessing.Manager().Value("b", False)
+        self.progress_callback = None
+
+    def cancel(self):
+        self.cancel_flag.value = True
+        print("Cancellation requested...")
+
+    def stage1_star_check(self, all_images):
+        """Stage 1: Filter out rated images"""
+        print("STAGE 1: Star Check")
+        unrated_images = []
+        rated_count = 0
+        
+        for filename in all_images:
+            if self.cancel_flag.value:
+                print("Cancelled during star check.")
+                return []
+                
+            path = os.path.join(self.folder, filename)
+            rating = EXIFHelper.get_rating(path)
+            
+            if rating == "0":  # Unrated images only
+                unrated_images.append(filename)
+            else:
+                rated_count += 1
+                print(f"Filtered out rated image: {filename} (rating: {rating})")
+        
+        print(f"Star check complete: {len(unrated_images)} unrated, {rated_count} rated (filtered)")
+        return unrated_images
+
+    def stage2_sharpness_check(self, unrated_images):
+        """Stage 2: Filter out blurry images using multiprocessing"""
+        print("\nSTAGE 2: Laplacian Sharpness Check")
+        
+        if not unrated_images:
+            print("No unrated images to process.")
+            return []
+
+        args = [
+            (self.folder, filename, self.base_blur, self.tolerance)
+            for filename in unrated_images
+        ]
+        pool_size = max(1, multiprocessing.cpu_count() - 2)
+
+        sharp_images = []
+        
+        with multiprocessing.Pool(pool_size) as pool:
+            result_async = pool.starmap_async(process_image_sharpness, args)
+
+            while not result_async.ready():
+                if self.cancel_flag.value:
+                    pool.terminate()
+                    pool.join()
+                    print("Cancelled during sharpness check.")
+                    return []
+                if self.progress_callback:
+                    self.progress_callback("Processing sharpness...")
+                time.sleep(0.1)
+
+            try:
+                results = result_async.get()
+            except Exception as e:
+                print(f"Error in multiprocessing: {e}")
+                return []
+
+        # Process results
+        sharp_count = 0
+        blurry_count = 0
+        
+        for result in results:
+            if result is None:
+                continue
+            filename, is_sharp, laplacian = result
+            if is_sharp:
+                sharp_images.append(filename)
+                sharp_count += 1
+            else:
+                blurry_count += 1
+
+        print(f"Sharpness check complete: {sharp_count} sharp, {blurry_count} blurry (filtered)")
+        return sharp_images
+
+    def stage3_burst_grouping(self, sharp_images):
+        """Stage 3: Group bursts and select best from each group"""
+        print("\nSTAGE 3: Burst Grouping")
+        
+        if not sharp_images:
+            print("No sharp images to process.")
+            return []
+
+        # Create path list for sharp images only
+        sharp_paths = [os.path.join(self.folder, filename) for filename in sharp_images]
+        
+        # Group by DateTime
+        burst_groups = defaultdict(list)
+        non_burst_images = []
+        
+        for path in sharp_paths:
+            if self.cancel_flag.value:
+                print("Cancelled during burst grouping.")
+                return []
+                
+            dt = EXIFHelper.get_datetime_original(path)
+            if dt:
+                burst_groups[dt].append(path)
+            else:
+                non_burst_images.append(path)
+
+        # Filter to only actual burst groups (more than 1 image)
+        actual_bursts = {k: v for k, v in burst_groups.items() if len(v) > 1}
+        
+        # Add non-burst images from single-image "groups"
+        for k, v in burst_groups.items():
+            if len(v) == 1:
+                non_burst_images.extend(v)
+
+        final_selection = []
+        
+        # Process burst groups
+        burst_groups_processed = 0
+        images_from_bursts = 0
+        
+        for dt, group in actual_bursts.items():
+            if self.cancel_flag.value:
+                print("Cancelled during burst processing.")
+                return []
+                
+            # Score by laplacian variance
+            scored = [(compute_laplacian_variance(path), path) for path in group]
+            scored.sort(reverse=True)  # Highest laplacian first
+            
+            # Select top N from burst
+            selected_from_burst = scored[:self.burst_count]
+            for score, path in selected_from_burst:
+                final_selection.append(path)
+                images_from_bursts += 1
+                print(f"Selected from burst {dt}: {os.path.basename(path)} (score: {score:.1f})")
+            
+            burst_groups_processed += 1
+
+        # Add all non-burst images
+        final_selection.extend(non_burst_images)
+        
+        print(f"Burst grouping complete:")
+        print(f"  - Burst groups found: {len(actual_bursts)}")
+        print(f"  - Images selected from bursts: {images_from_bursts}")
+        print(f"  - Non-burst images: {len(non_burst_images)}")
+        print(f"  - Total final selection: {len(final_selection)}")
+        
+        return final_selection
+
+    def copy_final_images(self, final_paths, output_folder):
+        """Copy final selected images to output folder"""
+        print(f"\nCOPYING {len(final_paths)} IMAGES TO OUTPUT")
+        
+        os.makedirs(output_folder, exist_ok=True)
+        copied_count = 0
+        
+        for path in final_paths:
+            if self.cancel_flag.value:
+                print("Cancelled during copying.")
+                return copied_count
+                
+            try:
+                filename = os.path.basename(path)
+                dest_path = os.path.join(output_folder, filename)
+                shutil.copy(path, dest_path)
+                copied_count += 1
+                print(f"Copied: {filename}")
+            except Exception as e:
+                print(f"Error copying {path}: {e}")
+        
+        return copied_count
+
+    def run(self, use_starcheck=True, use_laplaciancheck=True, group_bursts=True, progress_callback=None):
+        """Run the three-stage filtering process"""
+        self.progress_callback = progress_callback
+        output_folder = os.path.join(self.folder, "Sharp")
+
+        if self.cancel_flag.value:
+            print("Cancelled before any processing.")
+            return
+
+        # Get all JPG files
+        all_images = [f for f in os.listdir(self.folder) if f.lower().endswith(".jpg")]
+        print(f"Found {len(all_images)} JPG files to process")
+        
+        if not all_images:
+            print("No JPG files found.")
+            return
+
+        # Stage 1: Star Check (if enabled)
+        if use_starcheck:
+            remaining_images = self.stage1_star_check(all_images)
+        else:
+            print("STAGE 1: Star Check (SKIPPED)")
+            remaining_images = all_images
+
+        if self.cancel_flag.value or not remaining_images:
+            return
+
+        # Stage 2: Sharpness Check (if enabled)
+        if use_laplaciancheck:
+            sharp_images = self.stage2_sharpness_check(remaining_images)
+        else:
+            print("\nSTAGE 2: Sharpness Check (SKIPPED)")
+            sharp_images = remaining_images
+
+        if self.cancel_flag.value or not sharp_images:
+            return
+
+        # Stage 3: Burst Grouping (if enabled)
+        if group_bursts:
+            final_paths = self.stage3_burst_grouping(sharp_images)
+        else:
+            print("\nSTAGE 3: Burst Grouping (SKIPPED)")
+            final_paths = [os.path.join(self.folder, f) for f in sharp_images]
+
+        if self.cancel_flag.value or not final_paths:
+            return
+
+        # Copy final selection
+        copied = self.copy_final_images(final_paths, output_folder)
+        
+        print(f"\n=== PROCESSING COMPLETE ===")
+        print(f"Started with: {len(all_images)} images")
+        print(f"Final selection: {len(final_paths)} images")
+        print(f"Successfully copied: {copied} images")
+        print(f"Output folder: {output_folder}")
 
 
-def main(folder, base_blur=0, tolerance=0,
+def main(folder, base_blur=0, tolerance=0, burst_count=2,
          use_starcheck=False, use_laplaciancheck=True, group_bursts=True,
          cancel_flag=None, progress_callback=None):
 
-    processor = ImageSharpnessProcessor(folder, base_blur, tolerance)
+    processor = ImageSharpnessProcessor(folder, base_blur, tolerance, burst_count)
 
     if cancel_flag:
         processor.cancel_flag = cancel_flag
@@ -269,4 +390,4 @@ def main(folder, base_blur=0, tolerance=0,
         use_laplaciancheck=use_laplaciancheck,
         group_bursts=group_bursts,
         progress_callback=progress_callback
-    ) 
+    )
