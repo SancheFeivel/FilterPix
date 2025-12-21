@@ -1,33 +1,84 @@
-# Image Culler
+# FilterPix
 
-## Requirements
+FilterPix is an offline image culling and sorting application designed to help photographers quickly clean large photo collections. It removes blurry images, selects the best shots from burst sequences, and optionally sorts images using AI-based content detection — all while keeping original files untouched.
 
-- Python 3.7 or higher  
-- Dependencies:`pip install opencv-python Pillow numpy tk`
+---
 
-## Usage
+## Key Features
 
-1. Run `gui.py` or the compiled `.exe`.
-2. Enter the full path to the folder containing `.jpg` images.
-3. (Optional) Click the ⚙️ **Settings** button to configure additional options:
-   - **Sorting Method**:  
-    Choose from:
-     - `Laplacian Variance`: Uses the variance of the Laplacian for sharpness measurement.
-     - `Rating System`: Uses the users star rating (set in camera or in file manager) to determine if image is sharp.
-   - **Blur Level Mode**:
-     Toggle between `Low`, `Medium`, or `High` to apply stricter blur filtering:  
-     - `Low`: Allows slightly blurry images.  
-     - `Medium`: Balanced filtering.  
-     - `High`: Only very sharp images are accepted.
-   - **Threshold Compensation** (optional):  
-     Adjusts sensitivity of sharpness detection:  
-     - Positive values raise the sharpness threshold (fewer images pass).  
-     - Negative values lower the threshold (more images pass).
-4. Click **Start** to begin processing. Sharp images will be copied into the `sharp/` folder.
-5. Click **Cancel** to stop processing early.
-6. Click **Open Folder** to view sorted results.
+- Sharpness-based filtering using Laplacian edge detection  
+- Burst sequence analysis with automatic best-shot selection  
+- Metadata-based rating filtering  
+- Optional AI-powered image detection and sorting  
+- Fully offline processing  
+- Non-destructive workflow (original files are never modified)
 
-## License
+---
 
-This project is licensed under the MIT License.
+## Quick Start
+
+1. Launch **FilterPix**
+2. Click **Input** and select the folder containing your images
+3. (Optional) Adjust filter and sorting settings
+4. Click **Start** to begin processing
+5. Review results in the output folders:
+   - **Sharp** – images that passed filters  
+   - **Sorted** – rejected images  
+
+Original image files are never modified.
+
+---
+
+## How It Works
+
+1. Select a folder containing images  
+2. Configure filtering and sorting options  
+3. Start processing  
+4. FilterPix copies images into organized output folders:
+   - **Sharp** — images that passed filters  
+   - **Sorted** — rejected images  
+
+The original image folder remains unchanged.
+
+---
+
+## Supported Formats
+
+- JPG  
+- JPEG  
+- PNG  
+- Other image formats supported by OpenCV and Pillow  
+
+---
+
+## Use Cases
+
+- Fast photo cleanup after events or shoots  
+- Selecting best shots from burst photography  
+- Removing out-of-focus or low-quality images  
+- Offline image organization on low- to mid-range hardware  
+
+---
+
+## Documentation
+
+- User Manual: `user manual.txt`  
+- Detailed settings, workflows, and filter behavior are documented in the manual  
+
+---
+
+## Technical Overview
+
+- Language: Python  
+- GUI: Tkinter  
+- Image Processing: OpenCV, Pillow  
+- AI Detection: YOLO (Ultralytics)  
+- Designed for offline execution  
+
+---
+
+## Disclaimer
+
+FilterPix only copies files for sorting purposes. It does not delete, modify, or overwrite original images. Ensure sufficient disk space is available before processing large image folders.
+"""
 
