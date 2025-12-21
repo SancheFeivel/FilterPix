@@ -9,19 +9,23 @@ import gc
 
 
 class AISorter:
-    def __init__(self, input_folder, solo, model_path="yolov8m.pt", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009):
+    def __init__(self, input_folder, solo, model_path="yolov8m.pt", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009, output_dir=None):
         # Set input_folder first, then modify it if needed
         self.input_folder = input_folder
         if not solo:
             self.input_folder = os.path.join(self.input_folder, "Sharp")
             
-        self.output_base = os.path.join(self.input_folder, "Sorted")
+        self.output_base = os.path.join(output_dir, "Sorted") if output_dir else os.path.join(self.input_folder, "Sorted")
         self.model = YOLO(model_path)
         self.conf = conf
         self.imgsz = imgsz
         self.subject_threshold = subject_threshold
-        self.cancel_flag = multiprocessing.Manager().Value("b", False)
+        self.cancel_flag = None
         self.progress_callback = None
+        self.start_time = None
+        self.total_time = None
+        
+        os.makedirs(self.output_base, exist_ok=True)
         
         # Target classes for detection
         self.target_classes = target_classes or [
@@ -50,7 +54,8 @@ class AISorter:
         print("Using device:", self.model.device)
 
     def cancel(self):
-        self.cancel_flag.value = True
+        if self.cancel_flag:
+            self.cancel_flag.set()
         print("Cancellation requested...")
 
     def get_exif_data(self, img_path):
@@ -80,7 +85,7 @@ class AISorter:
 
     def _process_single_image(self, image_path):
         """Process single image using categorization logic."""
-        if self.cancel_flag.value:
+        if self.cancel_flag and self.cancel_flag.is_set():
             return False
 
         try:
@@ -149,7 +154,7 @@ class AISorter:
             overall_avg_area = total_area / total_count if total_count > 0 else 0
 
             # Log analysis results
-            self.analyze_avg_detection_areas(category_avg_areas, overall_avg_area)
+            # self.analyze_avg_detection_areas(category_avg_areas, overall_avg_area)
 
             # Determine category using logic
             category = self.grouping(
@@ -161,26 +166,26 @@ class AISorter:
                 category_area_sums,
             )
 
-            # ✅ Only create folder if we’re actually moving something there
+            # Only create folder if we're actually moving something there
             dest_folder = os.path.join(self.output_base, category)
             os.makedirs(dest_folder, exist_ok=True)
 
             dest_path = os.path.join(dest_folder, os.path.basename(image_path))
             shutil.copyfile(image_path, dest_path)
-            print(f"✔ Moved {os.path.basename(image_path)} to {category}")
+            # print(f"Moved {os.path.basename(image_path)} to {category}")
             return True
 
         except Exception as e:
             print(f"Error processing {image_path}: {e}")
             return False
 
-    def analyze_avg_detection_areas(self, category_avg_areas, overall_avg_area):
-        """Log average detection sizes for analysis."""
-        print("\nAverage Detection Areas")
-        for cat, avg_area in category_avg_areas.items():
-            print(f"{cat.capitalize():<10}: {avg_area:.4f} ({avg_area*100:.2f}% of frame)")
-        print(f"Overall Avg : {overall_avg_area:.4f} ({overall_avg_area*100:.2f}% of frame)")
-        print("=" * 35)
+    # def analyze_avg_detection_areas(self, category_avg_areas, overall_avg_area):
+    #     """Log average detection sizes for analysis."""
+    #     print("\nAverage Detection Areas")
+    #     for cat, avg_area in category_avg_areas.items():
+    #         print(f"{cat.capitalize():<10}: {avg_area:.4f} ({avg_area*100:.2f}% of frame)")
+    #     print(f"Overall Avg : {overall_avg_area:.4f} ({overall_avg_area*100:.2f}% of frame)")
+    #     print("=" * 30)
 
     def grouping(self, class_counts, person_areas,
                  overall_avg_area, category_largest_areas, category_counts, category_area_sums):
@@ -244,36 +249,38 @@ class AISorter:
         return "other"
 
     def process_images_singlethreaded(self, progress_callback=None):
-        """Process all images in the input folder using categorization."""
         self.progress_callback = progress_callback
-        start_time = time.time()
+        self.start_time = time.time()
 
         image_paths = self._get_image_paths()
-        if not image_paths:
-            print("No images found.")
-            return 0
+        total_images = len(image_paths)
 
-        print(f"Processing {len(image_paths)} images with YOLO categorization...")
+        if not image_paths:
+            return {
+                "total_images": 0,
+                "final_selection": 0,
+                "elapsed_time": 0
+            }
+
         processed_count = 0
-        
+
         for path in image_paths:
-            if self.cancel_flag.value:
-                print("Processing cancelled by user.")
+            if self.cancel_flag and self.cancel_flag.is_set():
                 break
-            
-            success = self._process_single_image(path)
-            if success:
+
+            if self._process_single_image(path):
                 processed_count += 1
                 if self.progress_callback:
-                    self.progress_callback(processed_count, len(image_paths))
+                    self.progress_callback(processed_count, total_images)
 
-        gc.collect()
-        
-        if not self.cancel_flag.value:
-            self._print_final_statistics()
-            print(f"\nFinished in {time.time() - start_time:.2f} seconds")
-        
-        return processed_count
+        self.total_time = time.time() - self.start_time
+
+        return {
+            "total_images": total_images,
+            "final_selection": processed_count,
+            "elapsed_time": self.total_time
+        }
+
 
     def _print_final_statistics(self):
         """Print final sorting statistics."""
@@ -289,7 +296,7 @@ class AISorter:
                             print(f"{category_folder}: {count} images")
         except OSError as e:
             print(f"Error reading output directory: {e}")
-        print("=" * 35)
+        print("=" * 30)
 
     def process_folder(self, folder_path, output_dir):
         """Legacy method for backward compatibility."""
@@ -298,24 +305,24 @@ class AISorter:
         return self.process_images_singlethreaded()
 
 
-def main(folder, mode="fast", solo_process=None, cancel_flag=None, progress_callback=None):
-    """Main entry point for the AI sorter."""
+def main(folder, output=None, mode="fast", solo_process=None, cancel_flag=None, progress_callback=None):
     if mode == "fast":
         config = {"model_path": "yolov8n.pt", "conf": 0.6, "imgsz": 320}
     elif mode == "accurate":
         config = {"model_path": "yolov8m.pt", "conf": 0.4, "imgsz": 640}
     else:
         raise ValueError("Mode must be either 'fast' or 'accurate'")
-    
+
     sorter = AISorter(
         input_folder=folder,
         model_path=config["model_path"],
         solo=solo_process,
         conf=config["conf"],
-        imgsz=config["imgsz"]
+        imgsz=config["imgsz"],
+        output_dir=output
     )
-    
+
     if cancel_flag:
         sorter.cancel_flag = cancel_flag
-        
-    return sorter.process_images_singlethreaded(progress_callback=progress_callback)
+
+    return sorter.process_images_singlethreaded(progress_callback)
