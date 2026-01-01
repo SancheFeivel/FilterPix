@@ -116,7 +116,7 @@ Displayed after processing completes:
 ## OUTPUT STRUCTURE
 
 - **Sharp**: Images that pass all enabled filters
-- **Sorted**: Rejected images (blurry, duplicates, or below threshold)
+- **Sorted**: Images sorte using object detection
 
 The original image folder is **never modified**. FilterPix only creates copied outputs.
 
@@ -127,7 +127,7 @@ The original image folder is **never modified**. FilterPix only creates copied o
 ### Excessive Image Rejection
 
 - Lower sharpness threshold to **Low**
-- Apply negative threshold compensation (e.g., `-20`)
+- Apply negative threshold compensation (e.g., `-10`)
 
 ### Insufficient Image Rejection
 
@@ -138,4 +138,5 @@ The original image folder is **never modified**. FilterPix only creates copied o
 
 - Disable Image Detection
 - Use **Fast** detection mode if detection is required
+
 
