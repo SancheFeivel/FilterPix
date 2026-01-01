@@ -16,11 +16,11 @@ FilterPix is an offline image culling and sorting application designed to help p
 
 ## DISCLAIMER
 
--Ensure you have sufficient free space on the output drive, at least equal to the size of the input folder
--Filtering and sorting are not 100% accurate; false results may occur
--Processing may cause high hardware usage, especially on low-end systems
--Remember: your original files remain untouched throughout the process
--User is fully responsible for verifying results and managing files
+- Ensure you have sufficient free space on the output drive, at least equal to the size of the input folder
+- Filtering and sorting are not 100% accurate; false results may occur
+- Processing may cause high hardware usage, especially on low-end systems
+- Remember: your original files remain untouched throughout the process
+- User is fully responsible for verifying results and managing files
 
 ---
 
