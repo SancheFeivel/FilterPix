@@ -39,14 +39,6 @@ Original image files are never modified.
 
 ---
 
-## Supported Formats
-
-- JPG  
-- JPEG  
-- PNG  
-
----
-
 ## Use Cases
 
 - Fast photo cleanup after events or shoots  
