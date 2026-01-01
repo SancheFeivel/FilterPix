@@ -1,7 +1,6 @@
 # FilterPix
 
-FilterPix is an offline image culling and sorting application designed to help photographers quickly clean large photo collections. It removes blurry images, selects the best shots from burst sequences, and optionally sorts images using AI-based content detection — all while keeping original files untouched.
-
+FilterPix is an offline image culling and sorting application designed to help photographers quickly organize large photo collections. It provides a fast, accessible way to remove unwanted or low-quality images after events or when managing image repositories. FilterPix optionally sorts images using AI-based object detection, all while keeping your original files untouched.
 ---
 
 ## Key Features
@@ -11,7 +10,17 @@ FilterPix is an offline image culling and sorting application designed to help p
 - Metadata-based rating filtering  
 - Optional AI-powered image detection and sorting  
 - Fully offline processing  
-- Non-destructive workflow (original files are never modified)
+- Non-destructive workflow
+
+---
+
+##DISCLAIMER
+
+-Ensure you have sufficient free space on the output drive, at least equal to the size of the input folder
+-Filtering and sorting are not 100% accurate; false results may occur
+-Processing may cause high hardware usage, especially on low-end systems
+-Remember: your original files remain untouched throughout the process
+-User is fully responsible for verifying results and managing files
 
 ---
 
@@ -23,22 +32,10 @@ FilterPix is an offline image culling and sorting application designed to help p
 4. Click **Start** to begin processing
 5. Review results in the output folders:
    - **Sharp** – images that passed filters  
-   - **Sorted** – rejected images  
+   - **Sorted** – images processed with object detection
+6. (Optional) After reviewing the output, you can delete the input folder to save storage
 
 Original image files are never modified.
-
----
-
-## How It Works
-
-1. Select a folder containing images  
-2. Configure filtering and sorting options  
-3. Start processing  
-4. FilterPix copies images into organized output folders:
-   - **Sharp** — images that passed filters  
-   - **Sorted** — rejected images  
-
-The original image folder remains unchanged.
 
 ---
 
@@ -47,7 +44,6 @@ The original image folder remains unchanged.
 - JPG  
 - JPEG  
 - PNG  
-- Other image formats supported by OpenCV and Pillow  
 
 ---
 
@@ -69,7 +65,7 @@ The original image folder remains unchanged.
 
 ## Technical Overview
 
-- Language: Python  
+- Language: Python 3.11
 - GUI: Tkinter  
 - Image Processing: OpenCV, Pillow  
 - AI Detection: YOLO (Ultralytics)  
@@ -77,8 +73,4 @@ The original image folder remains unchanged.
 
 ---
 
-## Disclaimer
-
-FilterPix only copies files for sorting purposes. It does not delete, modify, or overwrite original images. Ensure sufficient disk space is available before processing large image folders.
-"""
 
