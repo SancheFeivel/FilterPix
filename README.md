@@ -14,7 +14,7 @@ FilterPix is an offline image culling and sorting application designed to help p
 
 ---
 
-##DISCLAIMER
+## DISCLAIMER
 
 -Ensure you have sufficient free space on the output drive, at least equal to the size of the input folder
 -Filtering and sorting are not 100% accurate; false results may occur
