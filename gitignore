@@ -11,3 +11,5 @@ temp_*.py
 # Environment & logs
 .env
 *.log
+
+*.pt
