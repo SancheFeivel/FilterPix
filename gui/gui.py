@@ -19,7 +19,7 @@ def get_base_path():
         return Path(__file__).parent
 
 BASE_PATH = get_base_path()
-ASSETS_PATH = BASE_PATH / "assets" / "frame0"
+ASSETS_PATH = BASE_PATH / "frame0"
 
 def get_project_root():
     """Get project root (prod folder) for logic imports"""
