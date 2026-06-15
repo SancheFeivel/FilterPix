@@ -1,4 +1,5 @@
 import os
+import io
 import sys
 import cv2
 import time
@@ -22,7 +23,9 @@ def init_multiprocessing():
         print(f"DEBUG INIT: start method already set, leaving as {method!r}")
 
 def _pool_initializer():
-    """No-op initializer — prevents recursive worker spawning."""
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    FaceDetector._load()  # load cascades once per worker
     print(f"DEBUG WORKER: pool worker initialised (pid={os.getpid()})")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,7 +186,10 @@ class ImageAnalyzer:
     @staticmethod
     def is_sharp(image, path, base_blur, tolerance, exif_data=None):
         img = ImageAnalyzer.resize_then_crop(image, 720, 0.8)
-        img = cv2.GaussianBlur(img, (1, 1), 0)
+        
+        iso = exif_data.get('iso', 100) if exif_data else 100
+        if iso >= 1200:
+            img = cv2.GaussianBlur(img, (3, 3), 0)
 
         h, w = img.shape
         name = os.path.basename(path)
@@ -256,7 +262,7 @@ class ImageAnalyzer:
                         print(
                             f"DEBUG {name} FACE VETO OOF: "
                             f"eye_lap={face_lap:.1f} bg={bg:.1f} ratio={eye_vs_bg:.2f} "
-                            f"veto={veto_ratio:.2f} f/{fstop} ✗ BLUR"
+                            f"veto={veto_ratio:.2f} f/{fstop} X BLUR"
                         )
                         return False, 0.0
 
@@ -264,7 +270,7 @@ class ImageAnalyzer:
                         print(
                             f"DEBUG {name} FACE PASS sharp eyes: "
                             f"eye_lap={face_lap:.1f} bg={bg:.1f} ratio={eye_vs_bg:.2f} "
-                            f"floor={sharp_floor:.0f} f/{fstop} top3={top3_avg:.1f} ✓ SHARP"
+                            f"floor={sharp_floor:.0f} f/{fstop} top3={top3_avg:.1f} V SHARP"
                         )
                         return True, face_lap
 
@@ -320,7 +326,7 @@ class ImageAnalyzer:
             f"SCORE {score:.2f} THR {threshold:.2f} "
             f"f/{fstop} shallow_dof={shallow_dof} face=({face_action}) "
             f"top3={top3_avg:.1f} "
-            f"{'✓ SHARP' if sharp else '✗ BLUR'}"
+            f"{'V SHARP' if sharp else 'X BLUR'}"
         )
         return sharp, score
 
@@ -343,6 +349,7 @@ def process_image_sharpness(folder, filename, base_blur, tolerance, exif_cache):
             print(f"DEBUG WORKER [{pid}]: ERROR cv2.imread returned None for {filename}")
             return None
 
+        image = ImageAnalyzer.resize_short_side(image, 720)
         print(f"DEBUG WORKER [{pid}]: image loaded {filename} shape={image.shape} dtype={image.dtype}")
 
         exif_data = exif_cache.get(path)
@@ -377,7 +384,7 @@ def _run_pool(args, cancel_flag, progress_callback, stage_name, pool_timeout=300
     process_image_sharpness, polls for cancellation, and returns results.
     Returns None if cancelled or on error.
     """
-    pool_size = max(1, multiprocessing.cpu_count() - 2)
+    pool_size = max(1, min(6, multiprocessing.cpu_count() // 2))
     ctx = multiprocessing.get_context('spawn')
 
     print(f"DEBUG POOL [{stage_name}]: starting pool size={pool_size} jobs={len(args)} start_method={ctx.get_start_method()}")
@@ -663,7 +670,7 @@ class ImageSharpnessProcessor:
             selected_from_burst = scored[:self.burst_count]
             
             for i, (score, path) in enumerate(scored):
-                marker = "✓ KEEP" if i < self.burst_count else "✗ DROP"
+                marker = "V KEEP" if i < self.burst_count else "X DROP"
                 print(f"  {marker} {os.path.basename(path)} (sharpness: {score:.1f})")
 
             for score, path in selected_from_burst:

@@ -1126,7 +1126,7 @@ def import_logic_modules():
         return blur, detect
         
     except Exception as e:
-        print(f"✗ Error importing logic modules: {e}")
+        print(f"X Error importing logic modules: {e}")
         print(f"sys.path: {sys.path}")
         import traceback
         traceback.print_exc()
