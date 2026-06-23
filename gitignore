@@ -12,4 +12,7 @@ temp_*.py
 .env
 *.log
 
+# model weights
 *.pt
+*.pth
+*.onnx
