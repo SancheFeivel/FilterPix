@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FILTERPIX // v1.0</title>
+<style>
+@font-face {
+  font-family: 'VT323';
+  src: url('https://fonts.gstatic.com/s/vt323/v17/pxiKyp0ihIEF2isfFJU.woff2') format('woff2');
+  font-display: swap;
+}
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+:root{
+  --bg:        #08090a;
+  --panel:     #0e0f11;
+  --panel-2:   #131416;
+  --line:      #26282b;
+  --line-dim:  #1a1b1d;
+  --amber:     #ff9d2e;
+  --amber-hi:  #ffc873;
+  --amber-dim: #8a7355;
+  --amber-ghost: #3a3530;
+  --red:       #ff5d4a;
+  --green:     #8fd14f;
+  --text:      #c9cacc;
+  --text-dim:  #6c6e72;
+  --scanline-op: 0.035;
+
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-display: 'VT323', monospace;
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+
+html,body{
+  width:100%; height:100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow:hidden;
+  user-select:none;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---------- CRT atmosphere ---------- */
+.crt-overlay{
+  position:fixed; inset:0; pointer-events:none; z-index:999;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255,180,90,var(--scanline-op)) 0px,
+      rgba(255,180,90,var(--scanline-op)) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  mix-blend-mode: overlay;
+}
+.vignette{
+  position:fixed; inset:0; pointer-events:none; z-index:998;
+  background: radial-gradient(ellipse at 50% 40%, transparent 45%, rgba(0,0,0,0.55) 100%);
+}
+.grain{
+  position:fixed; inset:0; pointer-events:none; z-index:997; opacity:0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- shell ---------- */
+.shell{
+  width:100vw; height:100vh;
+  display:flex; flex-direction:column;
+  background:
+    radial-gradient(ellipse 900px 500px at 20% -10%, rgba(255,157,46,0.035), transparent 60%),
+    var(--bg);
+  border: 1px solid var(--line);
+}
+
+/* ---- titlebar / prompt bar ---- */
+.titlebar{
+  height:34px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size:12px; letter-spacing:0.08em;
+}
+.titlebar .dots{display:flex; gap:7px;}
+.titlebar .dot{width:9px; height:9px; border-radius:50%; background: var(--line);}
+.titlebar .dot.live{background: var(--amber); box-shadow:0 0 6px var(--amber);}
+.titlebar .brand{color:var(--amber-hi); font-weight:600;}
+.titlebar .brand .blink{display:inline-block; width:7px; height:13px; background:var(--amber); margin-left:6px; vertical-align:-2px; animation: blink 1.1s steps(1) infinite;}
+@keyframes blink{50%{opacity:0;}}
+.titlebar .ver{color:var(--text-dim);}
+
+/* ---- prompt / path bar ---- */
+.promptbar{
+  flex-shrink:0;
+  display:flex; align-items:stretch;
+  border-bottom:1px solid var(--line);
+  background: var(--panel-2);
+}
+.promptbar .seg{
+  display:flex; align-items:center; gap:8px;
+  padding: 10px 16px;
+  border-right:1px solid var(--line);
+  font-size:13px;
+}
+.promptbar .seg.grow{flex:1; min-width:0;}
+.prompt-chevron{color:var(--text-dim);}
+.path-text{
+  color:var(--amber-hi); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  font-weight:500;
+}
+.path-text.empty{color:var(--text-dim); font-style:italic;}
+.cursor-blink{display:inline-block; width:7px; height:14px; background:var(--amber); animation: blink 1.1s steps(1) infinite; vertical-align:-2px; margin-left:2px;}
+
+.btn{
+  appearance:none; border:1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size:12px; font-weight:500;
+  letter-spacing:0.04em;
+  padding: 7px 12px;
+  cursor:pointer;
+  display:inline-flex; align-items:center; gap:6px;
+  transition: background 0.12s, color 0.12s, border-color .12s;
+  white-space:nowrap;
+}
+.btn:hover{background: #1c1d20; border-color: var(--amber-dim); color:var(--amber-hi);}
+.btn:active{background: var(--amber); color:#1a1006;}
+.btn .key{
+  color:var(--text-dim); border:1px solid var(--line-dim); border-radius:2px;
+  font-size:10px; padding:0 4px; line-height:1.5;
+}
+.btn:hover .key{color:var(--amber-hi); border-color:var(--amber-dim);}
+.btn.primary{
+  background: var(--amber); color:#1a1006; border-color:var(--amber);
+  font-weight:600;
+}
+.btn.primary:hover{background: var(--amber-hi); border-color:var(--amber-hi);}
+.btn.danger{border-color:#5c2a22; color:var(--red);}
+.btn.danger:hover{background:#1f1310;}
+.btn:disabled{opacity:0.35; cursor:not-allowed; pointer-events:none;}
+
+/* ---------- main grid ---------- */
+.main{
+  flex:1; display:flex; min-height:0;
+  border-bottom:1px solid var(--line);
+}
+
+/* ---- left: rule console ---- */
+.console{
+  width:312px; flex-shrink:0;
+  display:flex; flex-direction:column;
+  border-right:1px solid var(--line);
+  background: var(--panel);
+  overflow-y:auto;
+}
+.console::-webkit-scrollbar{width:8px;}
+.console::-webkit-scrollbar-thumb{background:var(--line); }
+.console::-webkit-scrollbar-track{background:transparent;}
+
+.section-head{
+  display:flex; align-items:center; gap:10px;
+  padding: 14px 16px 8px;
+  font-size:11px; letter-spacing:0.14em; color:var(--text-dim);
+}
+.section-head::after{content:''; flex:1; height:1px; background:var(--line-dim);}
+
+.rule{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:10px;
+  padding: 11px 16px;
+  border-bottom:1px solid var(--line-dim);
+}
+.rule:hover{background: rgba(255,157,46,0.025);}
+.rule-label{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.rule-name{font-size:13px; color:var(--text); font-weight:500; display:flex; align-items:center; gap:7px;}
+.rule-desc{font-size:11px; color:var(--text-dim); line-height:1.4;}
+
+/* toggle: bracket style, like reference [F] Unfollow */
+.toggle{
+  flex-shrink:0;
+  border:1px solid var(--line);
+  background:transparent;
+  font-family:var(--font-mono);
+  font-size:11px; letter-spacing:0.05em;
+  padding: 4px 9px;
+  cursor:pointer;
+  color:var(--text-dim);
+  min-width:64px; text-align:center;
+}
+.toggle .b{color:#48484c;}
+.toggle.on{color:#1a1006; background:var(--amber); border-color:var(--amber); font-weight:600;}
+.toggle.on .b{color:#1a1006;}
+.toggle:not(.on):hover{border-color:var(--amber-dim); color:var(--amber-hi);}
+
+.subgroup{
+  padding: 4px 16px 14px;
+  display:flex; flex-direction:column; gap:10px;
+  border-bottom:1px solid var(--line-dim);
+}
+.subrow{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+.subrow-label{font-size:11px; color:var(--text-dim); letter-spacing:0.03em;}
+
+.segmented{display:flex; border:1px solid var(--line);}
+.segmented button{
+  flex:1; background:transparent; border:none; border-right:1px solid var(--line);
+  color:var(--text-dim); font-family:var(--font-mono); font-size:11px;
+  padding:5px 8px; cursor:pointer;
+}
+.segmented button:last-child{border-right:none;}
+.segmented button.active{background:var(--amber); color:#1a1006; font-weight:600;}
+.segmented button:not(.active):hover{color:var(--amber-hi);}
+
+.field{
+  background: var(--bg); border:1px solid var(--line); color:var(--amber-hi);
+  font-family:var(--font-mono); font-size:12px;
+  padding:5px 8px; width:64px; text-align:center;
+}
+.field:focus{outline:none; border-color:var(--amber-dim);}
+
+.disabled-overlay{opacity:0.32; pointer-events:none;}
+
+/* output destination */
+.dest-row{padding:12px 16px 16px; display:flex; flex-direction:column; gap:8px;}
+.dest-path{
+  font-size:11px; color:var(--text-dim); background:var(--bg);
+  border:1px solid var(--line-dim); padding:6px 8px; word-break:break-all;
+  min-height:16px;
+}
+
+/* ---- right: viewport / log ---- */
+.viewport{
+  flex:1; display:flex; flex-direction:column; min-width:0;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,157,46,0.008) 0 2px, transparent 2px 4px),
+    var(--bg);
+}
+
+.status-strip{
+  flex-shrink:0;
+  display:flex; align-items:stretch;
+  border-bottom:1px solid var(--line);
+}
+.stat-cell{
+  flex:1; padding:14px 18px;
+  border-right:1px solid var(--line-dim);
+  display:flex; flex-direction:column; gap:3px;
+}
+.stat-cell:last-child{border-right:none;}
+.stat-label{font-size:10px; letter-spacing:0.12em; color:var(--text-dim);}
+.stat-value{
+  font-family:var(--font-display); font-size:30px; line-height:1;
+  color:var(--amber-hi); letter-spacing:0.02em;
+}
+.stat-value.green{color:var(--green);}
+.stat-value.red{color:var(--red);}
+
+/* log feed */
+.log-region{
+  flex:1; overflow-y:auto; padding:16px 20px 8px;
+  font-size:12.5px; line-height:1.85;
+}
+.log-region::-webkit-scrollbar{width:8px;}
+.log-region::-webkit-scrollbar-thumb{background:var(--line);}
+.log-region::-webkit-scrollbar-track{background:transparent;}
+
+.log-line{display:flex; gap:10px; opacity:0; animation: rise 0.18s ease forwards;}
+@keyframes rise{from{opacity:0; transform:translateY(2px);} to{opacity:1; transform:translateY(0);}}
+.log-time{color:#48484c; flex-shrink:0;}
+.log-tag{flex-shrink:0; font-weight:600;}
+.log-tag.scan{color:var(--text-dim);}
+.log-tag.keep{color:var(--green);}
+.log-tag.drop{color:var(--red);}
+.log-tag.sys{color:var(--amber-hi);}
+.log-msg{color:var(--text);}
+.log-msg .dim{color:var(--text-dim);}
+
+.idle-banner{
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:14px; text-align:center; color:var(--text-dim);
+}
+.idle-banner .glyph{
+  font-family:var(--font-display); font-size:64px; color:#2e2f32; line-height:1;
+}
+.idle-banner .h{font-size:14px; color:var(--text-dim); letter-spacing:0.06em;}
+.idle-banner .sub{font-size:11.5px; max-width:340px; line-height:1.6;}
+
+.cursor-line{display:flex; gap:10px; align-items:center;}
+.block-cursor{width:8px; height:15px; background:var(--amber); animation: blink 0.9s steps(1) infinite;}
+
+/* progress rail */
+.progress-rail{
+  flex-shrink:0; height:3px; background:var(--line-dim); position:relative; overflow:hidden;
+}
+.progress-fill{
+  position:absolute; left:0; top:0; bottom:0; width:0%;
+  background: linear-gradient(90deg, var(--amber-dim), var(--amber));
+  transition: width 0.25s ease;
+}
+.progress-fill.indeterminate{
+  width:30% !important;
+  animation: sweep 1.3s ease-in-out infinite;
+}
+@keyframes sweep{
+  0%{left:-30%;}
+  100%{left:100%;}
+}
+
+/* ---- footer / hint bar ---- */
+.footer{
+  flex-shrink:0; height:30px;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 14px;
+  font-size:11px; color:var(--text-dim);
+  background:var(--panel);
+}
+.footer .hints{display:flex; gap:18px;}
+.footer .hint kbd{
+  color:var(--text-dim); border:1px solid var(--line-dim); border-radius:2px;
+  padding:0px 4px; margin-right:5px; font-size:10px;
+}
+.footer .hint{color:var(--text-dim);}
+.footer .session{color:#48484c;}
+
+/* settings drawer (slides over console area when open is toggled via tab) */
+.tabs{
+  display:flex; border-bottom:1px solid var(--line); flex-shrink:0;
+}
+.tab{
+  flex:1; padding:9px 0; text-align:center; font-size:11px; letter-spacing:0.08em;
+  color:var(--text-dim); cursor:pointer; border-right:1px solid var(--line);
+  background:var(--panel-2);
+}
+.tab:last-child{border-right:none;}
+.tab.active{color:var(--amber-hi); background:var(--panel); border-bottom:2px solid var(--amber); margin-bottom:-1px;}
+.tab:hover:not(.active){color:var(--text);}
+
+.pane{display:none;}
+.pane.active{display:flex; flex-direction:column;}
+
+/* scan-flicker on startup */
+@keyframes flicker-in{
+  0%{opacity:0;}
+  4%{opacity:0.6;}
+  8%{opacity:0.1;}
+  12%{opacity:0.8;}
+  18%{opacity:1;}
+  100%{opacity:1;}
+}
+.shell{animation: flicker-in 0.7s ease-out;}
+
+.tooltip-tag{
+  font-size:9px; color:var(--bg); background:var(--amber-dim);
+  padding:1px 5px; border-radius:2px; letter-spacing:0.05em;
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- titlebar -->
+  <div class="titlebar">
+    <div class="dots">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
+    <div class="brand">FILTERPIX</div>
+    <div class="ver">v1.0.8 // image culling engine</div>
+  </div>
+
+  <!-- prompt bar: folder select + run controls -->
+  <div class="promptbar">
+    <div class="seg grow">
+      <span class="prompt-chevron">&gt;</span>
+      <span class="path-text empty" id="pathText">no folder targeted — select a source directory <span class="cursor-blink"></span></span>
+    </div>
+    <div class="seg">
+      <button class="btn" id="btnSelect"><span class="key">F2</span> select folder</button>
+    </div>
+    <div class="seg">
+      <button class="btn primary" id="btnRun"><span class="key">↵</span> run cull</button>
+      <button class="btn danger" id="btnCancel" style="display:none; margin-left:8px;"><span class="key">ESC</span> abort</button>
+    </div>
+  </div>
+
+  <!-- main split -->
+  <div class="main">
+
+    <!-- LEFT: console -->
+    <div class="console">
+
+      <div class="tabs">
+        <div class="tab active" data-pane="rules">RULES</div>
+        <div class="tab" data-pane="output">OUTPUT</div>
+      </div>
+
+      <div class="pane active" id="pane-rules">
+        <div class="section-head">DETECTION FILTERS</div>
+
+        <div class="rule">
+          <div class="rule-label">
+            <div class="rule-name">sharpness check</div>
+            <div class="rule-desc">flags frames below the focus threshold</div>
+          </div>
+          <button class="toggle on" data-toggle="laplacian"><span class="b">[</span>ON<span class="b">]</span></button>
+        </div>
+        <div class="subgroup" id="sharpness-sub">
+          <div class="subrow">
+            <span class="subrow-label">sensitivity</span>
+            <div class="segmented" id="sharpSeg">
+              <button data-level="-20">LOW</button>
+              <button data-level="0" class="active">MED</button>
+              <button data-level="20">HIGH</button>
+            </div>
+          </div>
+          <div class="subrow">
+            <span class="subrow-label">tolerance offset</span>
+            <input class="field" id="toleranceField" type="text" placeholder="0">
+          </div>
+        </div>
+
+        <div class="rule">
+          <div class="rule-label">
+            <div class="rule-name">star check</div>
+            <div class="rule-desc">rejects unrated images</div>
+          </div>
+          <button class="toggle on" data-toggle="star"><span class="b">[</span>ON<span class="b">]</span></button>
+        </div>
+
+        <div class="rule">
+          <div class="rule-label">
+            <div class="rule-name">burst grouping</div>
+            <div class="rule-desc">clusters rapid sequences, keeps best of set</div>
+          </div>
+          <button class="toggle on" data-toggle="burst"><span class="b">[</span>ON<span class="b">]</span></button>
+        </div>
+
+        <div class="section-head">FACE / SUBJECT DETECTION</div>
+
+        <div class="rule">
+          <div class="rule-label">
+            <div class="rule-name">subject detection</div>
+            <div class="rule-desc">runs a secondary model pass per frame</div>
+          </div>
+          <button class="toggle" data-toggle="imgdetect"><span class="b">[</span>OFF<span class="b">]</span></button>
+        </div>
+        <div class="subgroup disabled-overlay" id="detect-sub">
+          <div class="subrow">
+            <span class="subrow-label">model mode</span>
+            <div class="segmented" id="modeSeg">
+              <button data-mode="fast" class="active">FAST</button>
+              <button data-mode="accurate">ACCURATE</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="pane" id="pane-output">
+        <div class="section-head">RESULT DESTINATION</div>
+        <div class="rule">
+          <div class="rule-label">
+            <div class="rule-name">use source folder</div>
+            <div class="rule-desc">writes a "_culled" subfolder alongside input</div>
+          </div>
+          <button class="toggle on" data-toggle="defaultdest"><span class="b">[</span>ON<span class="b">]</span></button>
+        </div>
+        <div class="dest-row">
+          <div class="subrow">
+            <span class="subrow-label">custom output path</span>
+            <button class="btn" id="btnOutputPick" style="font-size:10px; padding:4px 8px;">browse</button>
+          </div>
+          <div class="dest-path" id="outputPathDisplay">— inherits source folder —</div>
+        </div>
+
+        <div class="section-head">SESSION</div>
+        <div class="dest-row">
+          <div class="subrow">
+            <span class="subrow-label">last run duration</span>
+            <span style="color:var(--text-dim); font-size:11px;" id="lastDuration">—</span>
+          </div>
+          <div class="subrow">
+            <span class="subrow-label">config saved to disk</span>
+            <span style="color:var(--green); font-size:11px;">✓ auto</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: viewport -->
+    <div class="viewport">
+
+      <div class="status-strip">
+        <div class="stat-cell">
+          <span class="stat-label">SCANNED</span>
+          <span class="stat-value" id="statScanned">0</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-label">KEPT</span>
+          <span class="stat-value green" id="statKept">0</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-label">REJECTED</span>
+          <span class="stat-value red" id="statRejected">0</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-label">ELAPSED</span>
+          <span class="stat-value" id="statElapsed">00:00</span>
+        </div>
+      </div>
+
+      <div class="progress-rail">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+
+      <div class="log-region" id="logRegion">
+        <div class="idle-banner" id="idleBanner">
+          <div class="glyph">[ ]</div>
+          <div class="h">AWAITING SOURCE FOLDER</div>
+          <div class="sub">select a directory of frames above, configure your filters on the left, then run the cull. results land in a new output folder — nothing is deleted, only sorted.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div class="footer">
+    <div class="hints">
+      <span class="hint"><kbd>F2</kbd>select folder</span>
+      <span class="hint"><kbd>↵</kbd>run</span>
+      <span class="hint"><kbd>ESC</kbd>abort</span>
+      <span class="hint"><kbd>TAB</kbd>switch pane</span>
+    </div>
+    <div class="session" id="footerStatus">idle</div>
+  </div>
+
+</div>
+
+<div class="crt-overlay"></div>
+<!-- <div class="vignette"></div>  -->
+<div class="grain"></div>
+
+<script>
+/* ===================== state ===================== */
+const state = {
+  folderPath: null,
+  outputDir: null,
+  star: true,
+  laplacian: true,
+  burst: true,
+  imgDetect: false,
+  sharpness: 0,
+  tolerance: 0,
+  detectionMode: 'fast',
+  isProcessing: false,
+};
+
+/* ===================== helpers ===================== */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function fmtTime(d=new Date()){
+  return d.toTimeString().slice(0,8);
+}
+function fmtElapsed(seconds){
+  const m = Math.floor(seconds/60).toString().padStart(2,'0');
+  const s = Math.floor(seconds%60).toString().padStart(2,'0');
+  return `${m}:${s}`;
+}
+
+/* ===================== tabs ===================== */
+$$('.tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    $$('.tab').forEach(t=>t.classList.remove('active'));
+    $$('.pane').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    $('#pane-'+tab.dataset.pane).classList.add('active');
+  });
+});
+
+/* ===================== toggles ===================== */
+function setToggle(btn, on){
+  btn.classList.toggle('on', on);
+  btn.innerHTML = `<span class="b">[</span>${on ? 'ON' : 'OFF'}<span class="b">]</span>`;
+}
+
+$$('.toggle').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const key = btn.dataset.toggle;
+    if(key === 'laplacian'){
+      state.laplacian = !state.laplacian;
+      setToggle(btn, state.laplacian);
+      $('#sharpness-sub').classList.toggle('disabled-overlay', !state.laplacian);
+    } else if(key === 'star'){
+      state.star = !state.star;
+      setToggle(btn, state.star);
+    } else if(key === 'burst'){
+      state.burst = !state.burst;
+      setToggle(btn, state.burst);
+    } else if(key === 'imgdetect'){
+      state.imgDetect = !state.imgDetect;
+      setToggle(btn, state.imgDetect);
+      $('#detect-sub').classList.toggle('disabled-overlay', !state.imgDetect);
+    } else if(key === 'defaultdest'){
+      const usingDefault = !btn.classList.contains('on');
+      setToggle(btn, usingDefault);
+      if(usingDefault){
+        state.outputDir = null;
+        $('#outputPathDisplay').textContent = '— inherits source folder —';
+      }
+    }
+    pushConfigToBackend();
+  });
+});
+
+/* sharpness segmented */
+$('#sharpSeg').addEventListener('click', (e)=>{
+  const b = e.target.closest('button');
+  if(!b) return;
+  $$('#sharpSeg button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  state.sharpness = parseInt(b.dataset.level, 10);
+  pushConfigToBackend();
+});
+
+/* detection mode segmented */
+$('#modeSeg').addEventListener('click', (e)=>{
+  const b = e.target.closest('button');
+  if(!b) return;
+  $$('#modeSeg button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  state.detectionMode = b.dataset.mode;
+  pushConfigToBackend();
+});
+
+/* tolerance field */
+$('#toleranceField').addEventListener('change', (e)=>{
+  const v = parseInt(e.target.value, 10);
+  state.tolerance = isNaN(v) ? 0 : v;
+  pushConfigToBackend();
+});
+
+/* ===================== folder selection ===================== */
+async function selectFolder(){
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.select_folder){
+    const folder = await window.pywebview.api.select_folder();
+    if(folder){ applyFolder(folder); }
+  } else {
+    // fallback for browser preview
+    const fake = '/Users/demo/shoots/wedding_oct_2025';
+    applyFolder(fake);
+  }
+}
+function applyFolder(folder){
+  state.folderPath = folder;
+  const el = $('#pathText');
+  el.classList.remove('empty');
+  el.innerHTML = folder + '<span class="cursor-blink"></span>';
+  if(!state.outputDir){
+    $('#outputPathDisplay').textContent = '— inherits source folder —';
+  }
+  pushConfigToBackend();
+}
+
+$('#btnSelect').addEventListener('click', selectFolder);
+
+$('#btnOutputPick').addEventListener('click', async ()=>{
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.select_output_folder){
+    const folder = await window.pywebview.api.select_output_folder();
+    if(folder){
+      state.outputDir = folder;
+      $('#outputPathDisplay').textContent = folder;
+      // flip the "use source folder" toggle off
+      const defBtn = document.querySelector('[data-toggle="defaultdest"]');
+      setToggle(defBtn, false);
+      pushConfigToBackend();
+    }
+  }
+});
+
+/* ===================== logging ===================== */
+let logCounter = 0;
+function logLine(tag, msg, time=null){
+  const region = $('#logRegion');
+  const banner = $('#idleBanner');
+  if(banner) banner.remove();
+
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.style.animationDelay = '0ms';
+  line.innerHTML = `
+    <span class="log-time">${time || fmtTime()}</span>
+    <span class="log-tag ${tag.cls}">${tag.label}</span>
+    <span class="log-msg">${msg}</span>
+  `;
+  region.appendChild(line);
+  region.scrollTop = region.scrollHeight;
+  logCounter++;
+  // cap log length for perf
+  if(logCounter > 400){
+    const first = region.querySelector('.log-line');
+    if(first) first.remove();
+  }
+}
+
+function clearLog(){
+  $('#logRegion').innerHTML = '';
+  logCounter = 0;
+}
+
+/* ===================== run / cancel ===================== */
+let elapsedTimer = null;
+let elapsedSeconds = 0;
+
+function startElapsedClock(){
+  elapsedSeconds = 0;
+  $('#statElapsed').textContent = fmtElapsed(0);
+  elapsedTimer = setInterval(()=>{
+    elapsedSeconds++;
+    $('#statElapsed').textContent = fmtElapsed(elapsedSeconds);
+  }, 1000);
+}
+function stopElapsedClock(){
+  if(elapsedTimer) clearInterval(elapsedTimer);
+  elapsedTimer = null;
+}
+
+function setProcessingUI(isProcessing){
+  state.isProcessing = isProcessing;
+  $('#btnRun').style.display = isProcessing ? 'none' : 'inline-flex';
+  $('#btnCancel').style.display = isProcessing ? 'inline-flex' : 'none';
+  $('#footerStatus').textContent = isProcessing ? 'running cull operation...' : 'idle';
+  $('#progressFill').classList.toggle('indeterminate', isProcessing);
+  if(!isProcessing){
+    $('#progressFill').style.width = '0%';
+  }
+}
+
+async function runCull(){
+  if(state.isProcessing) return;
+  if(!state.folderPath){
+    logLine({cls:'sys', label:'SYS'}, '<span class="dim">no source folder targeted. select one before running.</span>');
+    $('#footerStatus').textContent = 'error: no folder selected';
+    return;
+  }
+
+  clearLog();
+  $('#statScanned').textContent = '0';
+  $('#statKept').textContent = '0';
+  $('#statRejected').textContent = '0';
+  setProcessingUI(true);
+  startElapsedClock();
+
+  logLine({cls:'sys', label:'SYS'}, `cull initiated on <span class="dim">${state.folderPath}</span>`);
+  logLine({cls:'sys', label:'SYS'}, `filters: sharpness=${state.laplacian?'on':'off'} eyes=${state.star?'on':'off'} burst=${state.burst?'on':'off'} subject=${state.imgDetect?state.detectionMode:'off'}`);
+
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.start_cull){
+    try{
+      await window.pywebview.api.start_cull({
+        folder: state.folderPath,
+        output: state.outputDir,
+        base_blur: state.sharpness,
+        tolerance: state.tolerance,
+        use_starcheck: state.star,
+        use_laplaciancheck: state.laplacian,
+        group_bursts: state.burst,
+        img_detect: state.imgDetect,
+        detection_mode: state.detectionMode,
+      });
+    }catch(err){
+      logLine({cls:'drop', label:'ERR'}, 'backend call failed: ' + err);
+      finishCull({error:true});
+    }
+  } else {
+    // ---- demo simulation for browser preview ----
+    simulateRun();
+  }
+}
+
+function finishCull(result){
+  stopElapsedClock();
+  setProcessingUI(false);
+  const kept = result.kept ?? $('#statKept').textContent;
+  const total = result.total ?? $('#statScanned').textContent;
+  if(result.error){
+    logLine({cls:'drop', label:'ERR'}, 'process terminated unexpectedly.');
+    $('#footerStatus').textContent = 'error — see log';
+  } else if(result.cancelled){
+    logLine({cls:'sys', label:'SYS'}, 'cull aborted by user.');
+    $('#footerStatus').textContent = 'aborted';
+  } else {
+    logLine({cls:'sys', label:'SYS'}, `done. ${kept}/${total} frames kept. output written to <span class="dim">${state.outputDir || state.folderPath + '/_culled'}</span>`);
+    $('#footerStatus').textContent = `complete — ${kept}/${total} kept`;
+    $('#lastDuration').textContent = fmtElapsed(elapsedSeconds);
+  }
+}
+
+$('#btnRun').addEventListener('click', runCull);
+$('#btnCancel').addEventListener('click', ()=>{
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.cancel_cull){
+    window.pywebview.api.cancel_cull();
+  }
+  logLine({cls:'sys', label:'SYS'}, 'abort signal sent...');
+});
+
+/* keyboard shortcuts matching footer hints */
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'F2'){ e.preventDefault(); selectFolder(); }
+  if(e.key === 'Enter' && !state.isProcessing){ runCull(); }
+  if(e.key === 'Escape' && state.isProcessing){ $('#btnCancel').click(); }
+  if(e.key === 'Tab'){
+    e.preventDefault();
+    const tabs = [...$$('.tab')];
+    const idx = tabs.findIndex(t=>t.classList.contains('active'));
+    tabs[(idx+1)%tabs.length].click();
+  }
+});
+
+/* ===================== backend bridge: progress hook ===================== */
+/* Python side calls: window.onCullProgress({scanned, kept, rejected, stage, tag, msg}) */
+window.onCullProgress = function(payload){
+  if(payload.scanned !== undefined) $('#statScanned').textContent = payload.scanned;
+  if(payload.kept !== undefined) $('#statKept').textContent = payload.kept;
+  if(payload.rejected !== undefined) $('#statRejected').textContent = payload.rejected;
+  if(payload.percent !== undefined){
+    $('#progressFill').classList.remove('indeterminate');
+    $('#progressFill').style.width = payload.percent + '%';
+  }
+  if(payload.msg){
+    const tagMap = {
+      scan: {cls:'scan', label:'SCAN'},
+      keep: {cls:'keep', label:'KEEP'},
+      drop: {cls:'drop', label:'DROP'},
+      sys:  {cls:'sys',  label:'SYS'},
+    };
+    logLine(tagMap[payload.tag] || tagMap.sys, payload.msg);
+  }
+};
+window.onCullComplete = function(result){
+  finishCull(result || {});
+};
+
+function pushConfigToBackend(){
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.update_settings){
+    window.pywebview.api.update_settings({
+      star_enabled: state.star,
+      laplacian_enabled: state.laplacian,
+      burst_enabled: state.burst,
+      img_detect_enabled: state.imgDetect,
+      sharpness_level: state.sharpness,
+      tolerance: state.tolerance,
+      detection_mode: state.detectionMode,
+      last_folder: state.folderPath,
+    });
+  }
+}
+
+/* ===================== load saved settings on boot ===================== */
+async function loadSettings(){
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.get_settings){
+    const s = await window.pywebview.api.get_settings();
+    if(!s) return;
+    state.star = s.star_enabled ?? true;
+    state.laplacian = s.laplacian_enabled ?? true;
+    state.burst = s.burst_enabled ?? true;
+    state.imgDetect = s.img_detect_enabled ?? false;
+    state.sharpness = s.sharpness_level ?? 0;
+    state.tolerance = s.tolerance ?? 0;
+    state.detectionMode = s.detection_mode ?? 'fast';
+
+    setToggle(document.querySelector('[data-toggle="laplacian"]'), state.laplacian);
+    setToggle(document.querySelector('[data-toggle="star"]'), state.star);
+    setToggle(document.querySelector('[data-toggle="burst"]'), state.burst);
+    setToggle(document.querySelector('[data-toggle="imgdetect"]'), state.imgDetect);
+    $('#sharpness-sub').classList.toggle('disabled-overlay', !state.laplacian);
+    $('#detect-sub').classList.toggle('disabled-overlay', !state.imgDetect);
+
+    $$('#sharpSeg button').forEach(b=>b.classList.toggle('active', parseInt(b.dataset.level)===state.sharpness));
+    $$('#modeSeg button').forEach(b=>b.classList.toggle('active', b.dataset.mode===state.detectionMode));
+    if(state.tolerance) $('#toleranceField').value = state.tolerance;
+
+    if(s.last_folder){ applyFolder(s.last_folder); }
+
+    if(s.output_directory){
+      state.outputDir = s.output_directory;
+      $('#outputPathDisplay').textContent = s.output_directory;
+      const defBtn = document.querySelector('[data-toggle="defaultdest"]');
+      setToggle(defBtn, false);
+    }
+  }
+}
+loadSettings();
+
+/* ===================== browser-preview simulation ===================== */
+function simulateRun(){
+  const total = 240;
+  let i = 0;
+  let kept = 0, rejected = 0;
+  const stages = ['scanning frame', 'checking sharpness', 'detecting bursts'];
+  const interval = setInterval(()=>{
+    if(!state.isProcessing){ clearInterval(interval); return; }
+    i++;
+    const isKeep = Math.random() > 0.45;
+    if(isKeep) kept++; else rejected++;
+    const blur = (Math.random()*0.4).toFixed(3);
+    window.onCullProgress({
+      scanned: i, kept, rejected,
+      percent: Math.round((i/total)*100),
+      tag: isKeep ? 'keep' : 'drop',
+      msg: `frame_${String(i).padStart(4,'0')}.jpg <span class="dim">blur=${blur}</span> → ${isKeep ? 'KEEP' : 'REJECT'}`
+    });
+    if(i >= total){
+      clearInterval(interval);
+      window.onCullComplete({kept, total, rejected});
+    }
+  }, 45);
+}
+
+/* abort handling for simulation */
+const originalCancel = $('#btnCancel').onclick;
+$('#btnCancel').addEventListener('click', ()=>{
+  if(!window.pywebview){
+    state.isProcessing = false;
+    finishCull({cancelled:true});
+  }
+});
+</script>
+
+</body>
+</html>
