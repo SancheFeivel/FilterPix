@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FILTERPIX // boot</title>
+<link rel="preload" href="assets/fonts/VT323-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/IBMPlexMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face {
+  font-family: 'VT323';
+  src: url('assets/fonts/VT323-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: optional;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('assets/fonts/IBMPlexMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: optional;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('assets/fonts/IBMPlexMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: optional;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('assets/fonts/IBMPlexMono-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: optional;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('assets/fonts/IBMPlexMono-Italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: optional;
+}
+
+:root{
+  --bg:        #08090a;
+  --panel:     #0e0f11;
+  --line:      #26282b;
+  --line-dim:  #1a1b1d;
+  --amber:     #ff9d2e;
+  --amber-hi:  #ffc873;
+  --amber-dim: #8a7355;
+  --red:       #ff5d4a;
+  --green:     #8fd14f;
+  --text:      #c9cacc;
+  --text-dim:  #6c6e72;
+
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-display: 'VT323', monospace;
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+
+html,body{
+  width:100%; height:100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow:hidden;
+  user-select:none;
+  -webkit-font-smoothing:antialiased;
+}
+
+.crt-overlay{
+  position:fixed; inset:0; pointer-events:none; z-index:999;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255,180,90,0.035) 0px,
+      rgba(255,180,90,0.035) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  mix-blend-mode: overlay;
+}
+.vignette{
+  position:fixed; inset:0; pointer-events:none; z-index:998;
+  background: radial-gradient(ellipse at 50% 45%, transparent 40%, rgba(0,0,0,0.6) 100%);
+}
+
+.shell{
+  width:100vw; height:100vh;
+  display:flex; flex-direction:column;
+  background:
+    radial-gradient(ellipse 700px 420px at 50% 0%, rgba(255,157,46,0.05), transparent 60%),
+    var(--bg);
+  border: 1px solid var(--line);
+}
+
+.titlebar{
+  height:34px; flex-shrink:0;
+  display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
+  padding:0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size:12px; letter-spacing:0.08em;
+}
+.titlebar .dots{justify-self:start;}
+.titlebar .brand{justify-self:center;}
+.titlebar .ver{justify-self:end;}
+.titlebar .dots{display:flex; gap:7px;}
+.titlebar .dot{width:9px; height:9px; border-radius:50%; background: var(--line);}
+.titlebar .dot.live{background: var(--amber); box-shadow:0 0 6px var(--amber); animation: pulse 1.6s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;} 50%{opacity:0.4;}}
+.titlebar .brand{color:var(--amber-hi); font-weight:600;}
+.titlebar .ver{color:var(--text-dim);}
+
+.body-area{
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding: 0 36px;
+  gap:28px;
+}
+
+.logo-block{
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  animation: flicker-in 0.9s ease-out;
+}
+@keyframes flicker-in{
+  0%{opacity:0;}
+  6%{opacity:0.5;}
+  10%{opacity:0.05;}
+  16%{opacity:0.75;}
+  24%{opacity:1;}
+  100%{opacity:1;}
+}
+.logo-block .glyph{
+  font-family: var(--font-display);
+  font-size: 58px;
+  letter-spacing: 0.06em;
+  color: var(--amber-hi);
+  text-shadow: 0 0 18px rgba(255,157,46,0.35);
+  line-height: 1;
+  transform: translateX(-0.06em);
+}
+.logo-block .sub{
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+  color: var(--text-dim);
+}
+
+.boot-console{
+  width: 100%;
+  max-width: 420px;
+  display:flex; flex-direction:column;
+  gap: 2px;
+  min-height: 168px;
+}
+
+.boot-line{
+  display:flex; gap:10px;
+  font-size:12px; line-height:1.7;
+  opacity:0;
+  animation: rise 0.25s ease forwards;
+}
+@keyframes rise{from{opacity:0; transform:translateY(3px);} to{opacity:1; transform:translateY(0);}}
+.boot-tag{flex-shrink:0; width:42px; font-weight:600; color: var(--amber-dim);}
+.boot-tag.ok{color: var(--green);}
+.boot-tag.err{color: var(--red);}
+.boot-msg{color: var(--text);}
+.boot-msg .dim{color: var(--text-dim);}
+
+.boot-cursor{
+  display:flex; align-items:center; gap:8px;
+  margin-top: 4px;
+}
+.boot-cursor .blk{
+  width:7px; height:13px; background:var(--amber);
+  animation: blink 0.9s steps(1) infinite;
+}
+@keyframes blink{50%{opacity:0;}}
+.boot-cursor .lbl{font-size:11px; color:var(--text-dim); letter-spacing:0.05em;}
+
+.bar-track{
+  width:100%; height:3px; background: var(--line-dim);
+  position:relative; overflow:hidden; margin-top:8px;
+}
+.bar-fill{
+  position:absolute; left:0; top:0; bottom:0;
+  width:28%;
+  background: linear-gradient(90deg, var(--amber-dim), var(--amber));
+  animation: sweep 1.25s ease-in-out infinite;
+}
+@keyframes sweep{
+  0%{left:-28%;}
+  100%{left:100%;}
+}
+.bar-fill.done{
+  animation:none; width:100%; left:0;
+  background: linear-gradient(90deg, var(--amber-dim), var(--green));
+  transition: width 0.4s ease;
+}
+
+.footer{
+  flex-shrink:0; height:26px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:10.5px; color:#48484c; letter-spacing:0.08em;
+  background:var(--panel);
+  border-top:1px solid var(--line);
+}
+
+.err-block{
+  display:none;
+  flex-direction:column; gap:10px; align-items:center;
+  margin-top: 6px;
+}
+.err-block.show{display:flex;}
+.err-block .err-title{color:var(--red); font-size:12px; font-weight:600; letter-spacing:0.05em;}
+.err-block .err-hint{color:var(--text-dim); font-size:11px; text-align:center; max-width:380px; line-height:1.5;}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <div class="titlebar">
+    <div class="dots">
+      <div class="dot"></div><div class="dot"></div><div class="dot live"></div>
+    </div>
+    <div class="brand">FILTERPIX</div>
+    <div class="ver">boot sequence</div>
+  </div>
+
+  <div class="body-area">
+
+    <div class="logo-block">
+      <div class="glyph">FILTERPIX</div>
+      <div class="sub">IMAGE CULLING ENGINE</div>
+    </div>
+
+    <div class="boot-console" id="bootConsole">
+      <!-- lines injected here -->
+    </div>
+
+    <div class="bar-track">
+      <div class="bar-fill" id="barFill"></div>
+    </div>
+
+    <div class="err-block" id="errBlock">
+      <div class="err-title">✕ STARTUP FAILED</div>
+      <div class="err-hint" id="errHint">backend modules could not be loaded. check that blur_sorter.py and detection.py are present and importable, then restart the application.</div>
+    </div>
+
+  </div>
+
+  <div class="footer">v1.0.9 // initializing</div>
+
+</div>
+
+<div class="crt-overlay"></div>
+<div class="vignette"></div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+
+function addLine(tag, msg, cls){
+  const console_ = $('#bootConsole');
+  const line = document.createElement('div');
+  line.className = 'boot-line';
+  line.innerHTML = `<span class="boot-tag ${cls||''}">${tag}</span><span class="boot-msg">${msg}</span>`;
+  console_.appendChild(line);
+  return line;
+}
+
+/* called by Python: window.onBootMessage({tag, msg, cls}) */
+window.onBootMessage = function(payload){
+  addLine(payload.tag || '...', payload.msg || '', payload.cls || '');
+};
+
+/* called by Python on success — main window is about to take over */
+window.onBootComplete = function(){
+  $('#barFill').classList.add('done');
+  addLine('OK', 'handing off to main window <span class="dim">...</span>', 'ok');
+};
+
+/* called by Python on failure — splash stays up so the user can read the error */
+window.onBootError = function(payload){
+  $('#barFill').classList.add('done');
+  $('#barFill').style.background = 'linear-gradient(90deg, var(--amber-dim), var(--red))';
+  addLine('ERR', payload && payload.msg ? payload.msg : 'unknown failure during startup.', 'err');
+  $('#errBlock').classList.add('show');
+  if(payload && payload.detail){
+    $('#errHint').textContent = payload.detail;
+  }
+};
+
+/* boot sequence for browser-preview (no pywebview attached) */
+if(!window.pywebview){
+  const demo = [
+    {tag:'SYS', msg:'loading saved settings <span class="dim">...</span>'},
+    {tag:'SYS', msg:'importing blur_sorter.py <span class="dim">...</span>'},
+    {tag:'SYS', msg:'importing detection.py <span class="dim">...</span>'},
+    {tag:'OK', msg:'backend modules ready', cls:'ok'},
+  ];
+  let i = 0;
+  const t = setInterval(()=>{
+    if(i >= demo.length){ clearInterval(t); window.onBootComplete(); return; }
+    window.onBootMessage(demo[i]);
+    i++;
+  }, 420);
+}
+</script>
+
+</body>
+</html>

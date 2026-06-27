@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -21,6 +22,7 @@ def get_project_root():
 
 BASE_PATH = get_base_path()
 HTML_PATH = BASE_PATH / "index.html"
+SPLASH_PATH = BASE_PATH / "splash.html"
 
 
 class SettingsManager:
@@ -114,6 +116,7 @@ class Api:
             "sharpness_level": saved.get("sharpness_level", 0),
             "tolerance": saved.get("tolerance", 0),
             "detection_mode": saved.get("detection_mode", "fast"),
+            "keep_rejected": saved.get("keep_rejected", False),
             "last_folder": saved.get("last_folder", None),
             "output_directory": saved.get("output_directory", None),
         }
@@ -136,7 +139,7 @@ class Api:
             self.settings.update(payload)
             if payload.get("last_folder"):
                 self.folder_path = payload["last_folder"]
-            if "output_directory" in payload:          # ← ADD THIS
+            if "output_directory" in payload:
                 self.output_directory = payload["output_directory"]
             ok = self.settings_mgr.save(self.settings)
             if not ok:
@@ -163,6 +166,23 @@ class Api:
             return self.output_directory
         return None
 
+    # ---------- JS-callable: reveal a folder in the OS file browser ----------
+    def open_folder(self, path):
+        target = path or self.folder_path
+        if not target or not os.path.isdir(target):
+            return {"error": "folder does not exist"}
+        try:
+            if sys.platform == "win32":
+                os.startfile(target)  # noqa: S606
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", target])
+            else:
+                subprocess.Popen(["xdg-open", target])
+            return {"opened": True}
+        except Exception as e:
+            print(f"open_folder failed: {e}")
+            return {"error": str(e)}
+
     # ---------- JS-callable: run / cancel ----------
     def start_cull(self, options):
         if self.is_processing:
@@ -183,6 +203,7 @@ class Api:
         laplacian_enabled = options.get("use_laplaciancheck", True)
         burst_enabled = options.get("group_bursts", True)
         img_detect_enabled = options.get("img_detect", False)
+        keep_rejected = options.get("keep_rejected", False)
 
         self.solo_detection = not (star_enabled or laplacian_enabled or burst_enabled)
 
@@ -194,6 +215,7 @@ class Api:
             "use_starcheck": star_enabled,
             "use_laplaciancheck": laplacian_enabled,
             "group_bursts": burst_enabled,
+            "keep_rejected": keep_rejected,
             "cancel_flag": self.sorter_cancel_event,
             "progress_callback": self._make_progress_callback(),
         }
@@ -228,6 +250,14 @@ class Api:
     def _run_sorter_then_maybe_detect(self, sorter_options, original_options, img_detect_enabled):
         try:
             self.sorter_stats = self.blur.main(**sorter_options) or {}
+        except TypeError:
+            # backend logic module may not yet accept keep_rejected — retry without it
+            sorter_options = {k: v for k, v in sorter_options.items() if k != "keep_rejected"}
+            try:
+                self.sorter_stats = self.blur.main(**sorter_options) or {}
+            except Exception as e:
+                print(f"Error in sorter: {e}")
+                self.sorter_stats = {}
         except Exception as e:
             print(f"Error in sorter: {e}")
             self.sorter_stats = {}
@@ -333,9 +363,20 @@ class Api:
 
 
 def main():
-    window_ref = {"win": None}
+    window_ref = {"win": None, "splash": None}
 
     api = Api(window_getter=lambda: window_ref["win"])
+
+    splash = webview.create_window(
+        "FilterPix",
+        str(SPLASH_PATH),
+        width=640,
+        height=480,
+        resizable=False,
+        frameless=False,
+        background_color="#08090a",
+    )
+    window_ref["splash"] = splash
 
     window = webview.create_window(
         "FilterPix",
@@ -346,17 +387,56 @@ def main():
         resizable=True,
         min_size=(900, 600),
         background_color="#0d0a06",
+        hidden=True,
     )
     window_ref["win"] = window
 
-    def on_loaded():
+    def push_boot(tag, msg, cls=""):
+        try:
+            splash.evaluate_js(f"window.onBootMessage({json.dumps({'tag': tag, 'msg': msg, 'cls': cls})})")
+        except Exception as e:
+            print(f"splash push failed: {e}")
+
+    def boot_sequence():
+        # this runs off the GUI thread so the splash stays animated/responsive
+        push_boot("SYS", "loading saved settings ...")
+        time.sleep(0.15)  # let the line render before the next one lands
+
+        push_boot("SYS", "importing blur_sorter.py ...")
         blur, detect = import_logic_modules()
+
         if blur and detect:
             api.attach_logic(blur, detect)
+            push_boot("OK", "backend modules ready", "ok")
+            time.sleep(0.25)
+            try:
+                splash.evaluate_js("window.onBootComplete()")
+            except Exception as e:
+                print(f"splash complete push failed: {e}")
+            time.sleep(0.3)  # brief pause so the "OK" line is readable
+            window.show()
+            splash.destroy()
         else:
-            print("CRITICAL: backend logic modules failed to import.")
+            push_boot("ERR", "backend modules failed to import", "err")
+            try:
+                splash.evaluate_js(
+                    "window.onBootError(%s)"
+                    % json.dumps({
+                        "msg": "backend modules failed to import.",
+                        "detail": "check that blur_sorter.py and detection.py are present under /logic "
+                                  "and importable, then restart the application. see console output for "
+                                  "the full traceback.",
+                    })
+                )
+            except Exception as e:
+                print(f"splash error push failed: {e}")
+            print("CRITICAL: backend logic modules failed to import. main window will not be shown.")
+            # splash stays open so the user can read the error; app exits when they close it
 
-    window.events.loaded += on_loaded
+    def on_splash_loaded():
+        threading.Thread(target=boot_sequence, daemon=True).start()
+
+    splash.events.loaded += on_splash_loaded
 
     webview.start(debug=False)
 

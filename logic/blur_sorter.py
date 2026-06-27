@@ -684,65 +684,73 @@ class ImageSharpnessProcessor:
         self.stats['final_selection'] = len(final_selection)
         return final_selection
 
-    def copy_final_images(self, final_paths, output_folder, all_images):
-        print(f"\nCOPYING {len(final_paths)} IMAGES TO OUTPUT")
-        
-        if os.path.basename(output_folder) == "Sharp":
-            base_output = os.path.dirname(output_folder)
-            sharp_folder = output_folder
-        else:
-            base_output = output_folder
-            sharp_folder = os.path.join(output_folder, "Sharp")
-        
-        os.makedirs(sharp_folder, exist_ok=True)
-        rejected_folder = os.path.join(base_output, "Rejected")
-        os.makedirs(rejected_folder, exist_ok=True)
-        
-        copied_count = 0
-        rejected_count = 0
-        final_basenames = {os.path.basename(path) for path in final_paths}
-        
-        for idx, path in enumerate(final_paths, 1):
-            if self.cancel_flag and self.cancel_flag.is_set():
-                print("Cancelled during copying.")
-                self.stats['copied_images'] = copied_count
-                self.stats['rejected_images'] = rejected_count
-                return copied_count
-            try:
-                dest_path = os.path.join(sharp_folder, os.path.basename(path))
-                shutil.copy(path, dest_path)
-                copied_count += 1
-                print(f"Copied to Sharp: {os.path.basename(path)}")
-                if self.progress_callback:
-                    self.progress_callback(idx, len(final_paths), "copying_sharp")
-            except Exception as e:
-                print(f"Error copying {path}: {e}")
-        
-        rejected_images = [f for f in all_images if f not in final_basenames]
-        
-        for idx, filename in enumerate(rejected_images, 1):
-            if self.cancel_flag and self.cancel_flag.is_set():
-                print("Cancelled during copying rejected images.")
-                self.stats['copied_images'] = copied_count
-                self.stats['rejected_images'] = rejected_count
-                return copied_count
-            try:
-                source_path = os.path.join(self.folder, filename)
-                dest_path = os.path.join(rejected_folder, filename)
-                shutil.copy(source_path, dest_path)
-                rejected_count += 1
-                print(f"Copied to Rejected: {filename}")
-                if self.progress_callback:
-                    self.progress_callback(idx, len(rejected_images), "copying_rejected")
-            except Exception as e:
-                print(f"Error copying rejected image {filename}: {e}")
+    def copy_final_images(self, final_paths, output_folder, all_images, keep_rejected=True):
+            print(f"\nCOPYING {len(final_paths)} IMAGES TO OUTPUT")
 
-        self.stats['copied_images'] = copied_count
-        self.stats['rejected_images'] = rejected_count
-        print(f"\nCopied {rejected_count} rejected images to: {rejected_folder}")
-        return copied_count
+            if os.path.basename(output_folder) == "Sharp":
+                base_output = os.path.dirname(output_folder)
+                sharp_folder = output_folder
+            else:
+                base_output = output_folder
+                sharp_folder = os.path.join(output_folder, "Sharp")
 
-    def run(self, use_starcheck=True, use_laplaciancheck=True, group_bursts=True, output_folder=None, progress_callback=None):
+            os.makedirs(sharp_folder, exist_ok=True)
+
+            copied_count = 0
+            rejected_count = 0
+            final_basenames = {os.path.basename(path) for path in final_paths}
+
+            for idx, path in enumerate(final_paths, 1):
+                if self.cancel_flag and self.cancel_flag.is_set():
+                    print("Cancelled during copying.")
+                    self.stats['copied_images'] = copied_count
+                    self.stats['rejected_images'] = rejected_count
+                    return copied_count
+                try:
+                    dest_path = os.path.join(sharp_folder, os.path.basename(path))
+                    shutil.copy(path, dest_path)
+                    copied_count += 1
+                    print(f"Copied to Sharp: {os.path.basename(path)}")
+                    if self.progress_callback:
+                        self.progress_callback(idx, len(final_paths), "copying_sharp")
+                except Exception as e:
+                    print(f"Error copying {path}: {e}")
+
+            rejected_images = [f for f in all_images if f not in final_basenames]
+
+            if keep_rejected:
+                rejected_folder = os.path.join(base_output, "Rejected")
+                os.makedirs(rejected_folder, exist_ok=True)
+
+                for idx, filename in enumerate(rejected_images, 1):
+                    if self.cancel_flag and self.cancel_flag.is_set():
+                        print("Cancelled during copying rejected images.")
+                        self.stats['copied_images'] = copied_count
+                        self.stats['rejected_images'] = rejected_count
+                        return copied_count
+                    try:
+                        source_path = os.path.join(self.folder, filename)
+                        dest_path = os.path.join(rejected_folder, filename)
+                        shutil.copy(source_path, dest_path)
+                        rejected_count += 1
+                        print(f"Copied to Rejected: {filename}")
+                        if self.progress_callback:
+                            self.progress_callback(idx, len(rejected_images), "copying_rejected")
+                    except Exception as e:
+                        print(f"Error copying rejected image {filename}: {e}")
+
+                print(f"\nCopied {rejected_count} rejected images to: {rejected_folder}")
+            else:
+                # keep_rejected is off — don't touch the source files, but the
+                # stat still needs to reflect how many were rejected.
+                rejected_count = len(rejected_images)
+                print(f"\nkeep_rejected=False — {rejected_count} rejected images left untouched in source folder")
+
+            self.stats['copied_images'] = copied_count
+            self.stats['rejected_images'] = rejected_count
+            return copied_count
+
+    def run(self, use_starcheck=True, use_laplaciancheck=True, group_bursts=True, output_folder=None, progress_callback=None, keep_rejected=False):
         self.progress_callback = progress_callback
         self.stats['start_time'] = time.time()
         self.use_starcheck, self.use_laplaciancheck, self.group_bursts = use_starcheck, use_laplaciancheck, group_bursts
@@ -763,12 +771,14 @@ class ImageSharpnessProcessor:
         if not all_images:
             self.stats['end_time'] = time.time()
             self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
+            self.stats.setdefault('rejected_images', self.stats['total_images'] - self.stats.get('final_selection', 0))
             return self.stats
 
         remaining_images = self.stage1_star_check(all_images) if use_starcheck else all_images
         if not remaining_images or (self.cancel_flag and self.cancel_flag.is_set()):
             self.stats['end_time'] = time.time()
             self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
+            self.stats.setdefault('rejected_images', self.stats['total_images'] - self.stats.get('final_selection', 0))
             return self.stats
 
         print(f"DEBUG RUN: {len(remaining_images)} images remaining after stage 1")
@@ -786,6 +796,7 @@ class ImageSharpnessProcessor:
         if not sharp_images or (self.cancel_flag and self.cancel_flag.is_set()):
             self.stats['end_time'] = time.time()
             self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
+            self.stats.setdefault('rejected_images', self.stats['total_images'] - self.stats.get('final_selection', 0))
             return self.stats
 
         if group_bursts:
@@ -795,7 +806,7 @@ class ImageSharpnessProcessor:
             self.stats['final_selection'] = len(final_paths)
 
         print(f"DEBUG RUN: {len(final_paths) if final_paths else 0} images after stage 3, copying now")
-        copied = self.copy_final_images(final_paths, output_folder, all_images)
+        copied = self.copy_final_images(final_paths, output_folder, all_images, keep_rejected=keep_rejected)
 
         self.stats['end_time'] = time.time()
         self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
@@ -816,9 +827,9 @@ class ImageSharpnessProcessor:
         return self.stats
 
 
-def main(folder, base_blur=0, tolerance=0, burst_count=2, use_starcheck=False, use_laplaciancheck=True, group_bursts=True, output=None, cancel_flag=None, progress_callback=None):
+def main(folder, base_blur=0, tolerance=0, burst_count=2, use_starcheck=False, use_laplaciancheck=True, group_bursts=True, output=None, cancel_flag=None, progress_callback=None, keep_rejected=True):
     processor = ImageSharpnessProcessor(folder, base_blur, tolerance, burst_count)
     if cancel_flag:
         processor.cancel_flag = cancel_flag
-    stats = processor.run(use_starcheck, use_laplaciancheck, group_bursts, output, progress_callback)
+    stats = processor.run(use_starcheck, use_laplaciancheck, group_bursts, output, progress_callback, keep_rejected=keep_rejected)
     return stats
