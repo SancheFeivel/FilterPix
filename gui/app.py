@@ -98,6 +98,8 @@ class Api:
         self.solo_detection = False
 
         self.sorter_stats = None
+        self._kept_count = 0
+        self._rejected_count = 0
         self.detection_stats = None
 
         self.blur = None
@@ -196,6 +198,11 @@ class Api:
         self.cancelled = False
         self.sorter_stats = None
         self.detection_stats = None
+
+        self.detection_stats = None
+        self._kept_count = 0
+        self._rejected_count = 0
+
         self.is_processing = True
         self._start_time = time.time()
 
@@ -301,19 +308,26 @@ class Api:
                 self._push_progress(tag="sys", msg=f"{stage_name.replace('_', ' ')}...")
                 return
 
-            tag = "scan"
-            if stage_name in ("copying_sharp",):
-                tag = "keep"
-            elif stage_name in ("copying_rejected",):
-                tag = "drop"
+            payload = {
+                "percent": int((current / total) * 100) if total else None,
+                "msg": f"{stage_name.replace('_', ' ')}: {current}/{total}",
+            }
 
-            percent = int((current / total) * 100) if total else None
-            self._push_progress(
-                scanned=current,
-                percent=percent,
-                tag=tag,
-                msg=f"{stage_name.replace('_', ' ')}: {current}/{total}",
-            )
+            if stage_name == "copying_sharp":
+                self._kept_count = current
+                payload["tag"] = "keep"
+                payload["kept"] = self._kept_count
+                payload["scanned"] = self._kept_count + self._rejected_count
+            elif stage_name == "copying_rejected":
+                self._rejected_count = current
+                payload["tag"] = "drop"
+                payload["rejected"] = self._rejected_count
+                payload["scanned"] = self._kept_count + self._rejected_count
+            else:
+                payload["tag"] = "scan"
+                payload["scanned"] = current
+
+            self._push_progress(**payload)
 
         return callback
 

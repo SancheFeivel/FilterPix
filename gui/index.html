@@ -924,8 +924,11 @@ async function loadSettings(){
     }
   }
 }
-loadSettings();
-
+if(window.pywebview){
+  loadSettings();
+} else {
+  window.addEventListener('pywebviewready', loadSettings);
+}
 /* ===================== browser-preview simulation ===================== */
 function simulateRun(){
   const total = 240;
