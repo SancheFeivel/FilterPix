@@ -5,8 +5,6 @@ import multiprocessing
 from ultralytics import YOLO
 from PIL import Image
 from PIL.ExifTags import TAGS
-import gc
-
 
 class AISorter:
     def __init__(self, input_folder, solo, model_path="yolov8m.pt", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009, output_dir=None):
@@ -50,7 +48,7 @@ class AISorter:
         self.categories = {
             "people":   [0],
             "vehicles": [1, 2, 3, 5, 7],
-            "sports":   [33, 36, 37, 39, 41],
+            "sports":   [36, 39, 41],
             "animals":  [16, 17, 18, 19, 20, 21]
         }
 
@@ -291,28 +289,6 @@ class AISorter:
             "final_selection": processed_count,
             "elapsed_time": self.total_time
         }
-
-    def _print_final_statistics(self):
-        print("\n=== Final Sorting Statistics ===")
-        try:
-            if os.path.exists(self.output_base):
-                for category_folder in os.listdir(self.output_base):
-                    category_path = os.path.join(self.output_base, category_folder)
-                    if os.path.isdir(category_path):
-                        count = len([f for f in os.listdir(category_path)
-                                     if f.lower().endswith(self.supported_extensions)])
-                        if count > 0:
-                            print(f"{category_folder}: {count} images")
-        except OSError as e:
-            print(f"Error reading output directory: {e}")
-        print("=" * 30)
-
-    def process_folder(self, folder_path, output_dir):
-        """Legacy method for backward compatibility."""
-        self.input_folder = folder_path
-        self.output_base = output_dir
-        return self.process_images_singlethreaded()
-
 
 def main(folder, output=None, mode="fast", solo_process=None, cancel_flag=None, progress_callback=None):
     if mode == "fast":

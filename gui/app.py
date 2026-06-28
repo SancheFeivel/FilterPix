@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-import webview  # pywebview
+import webview
 
 def get_base_path():
     if getattr(sys, "frozen", False):
@@ -26,9 +26,6 @@ SPLASH_PATH = BASE_PATH / "splash.html"
 
 
 class SettingsManager:
-    """Unchanged from the original gui.py — same on-disk location/shape,
-    so upgrading from the Tkinter build preserves a user's saved settings."""
-
     def __init__(self, app_name="FilterPix"):
         if sys.platform == "win32":
             app_data = os.getenv("APPDATA")
@@ -59,8 +56,6 @@ class SettingsManager:
 
 
 def import_logic_modules():
-    """Same strategy as gui.py: add /logic and project root to sys.path,
-    then import the existing backend modules untouched."""
     try:
         project_root = get_project_root()
         logic_path = project_root / "logic"
@@ -81,9 +76,12 @@ def import_logic_modules():
         return None, None
 
 
-class Api:
-    """Exposed to JS as window.pywebview.api.*"""
+def _first(d: dict, *keys, default=0):
+    """Return the first non-None value found under *keys* in *d*, else default."""
+    return next((d[k] for k in keys if d.get(k) is not None), default)
 
+
+class Api:
     def __init__(self, window_getter):
         self._get_window = window_getter
         self.settings_mgr = SettingsManager()
@@ -95,7 +93,6 @@ class Api:
         self.detection_cancel_event = threading.Event()
         self.is_processing = False
         self.cancelled = False
-        self.solo_detection = False
 
         self.sorter_stats = None
         self._kept_count = 0
@@ -106,7 +103,6 @@ class Api:
         self.detect = None
 
         self._start_time = None
-
         self._save_lock = threading.Lock()
 
         saved = self.settings_mgr.load()
@@ -127,12 +123,10 @@ class Api:
         if self.settings["output_directory"]:
             self.output_directory = self.settings["output_directory"]
 
-    # ---------- called once backend modules are ready ----------
     def attach_logic(self, blur, detect):
         self.blur = blur
         self.detect = detect
 
-    # ---------- JS-callable: settings ----------
     def get_settings(self):
         return self.settings
 
@@ -148,7 +142,6 @@ class Api:
                 print("WARNING: settings_mgr.save() failed in update_settings")
             return ok
 
-    # ---------- JS-callable: folder pickers ----------
     def select_folder(self):
         result = self._get_window().create_file_dialog(webview.FOLDER_DIALOG)
         if result:
@@ -168,14 +161,13 @@ class Api:
             return self.output_directory
         return None
 
-    # ---------- JS-callable: reveal a folder in the OS file browser ----------
     def open_folder(self, path):
         target = path or self.folder_path
         if not target or not os.path.isdir(target):
             return {"error": "folder does not exist"}
         try:
             if sys.platform == "win32":
-                os.startfile(target)  # noqa: S606
+                os.startfile(target)
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", target])
             else:
@@ -185,7 +177,6 @@ class Api:
             print(f"open_folder failed: {e}")
             return {"error": str(e)}
 
-    # ---------- JS-callable: run / cancel ----------
     def start_cull(self, options):
         if self.is_processing:
             return {"error": "already running"}
@@ -198,11 +189,8 @@ class Api:
         self.cancelled = False
         self.sorter_stats = None
         self.detection_stats = None
-
-        self.detection_stats = None
         self._kept_count = 0
         self._rejected_count = 0
-
         self.is_processing = True
         self._start_time = time.time()
 
@@ -212,7 +200,8 @@ class Api:
         img_detect_enabled = options.get("img_detect", False)
         keep_rejected = options.get("keep_rejected", False)
 
-        self.solo_detection = not (star_enabled or laplacian_enabled or burst_enabled)
+        # True when the caller wants detection but no sorter passes at all.
+        solo = not (star_enabled or laplacian_enabled or burst_enabled)
 
         sorter_options = {
             "folder": self.folder_path,
@@ -230,18 +219,11 @@ class Api:
         self.sorter_cancel_event.clear()
         self.detection_cancel_event.clear()
 
-        if self.solo_detection:
-            threading.Thread(
-                target=self._run_detection_only,
-                args=(options,),
-                daemon=True,
-            ).start()
-        else:
-            threading.Thread(
-                target=self._run_sorter_then_maybe_detect,
-                args=(sorter_options, options, img_detect_enabled),
-                daemon=True,
-            ).start()
+        threading.Thread(
+            target=self._run_worker,
+            args=(sorter_options, options, img_detect_enabled, solo),
+            daemon=True,
+        ).start()
 
         return {"started": True}
 
@@ -253,33 +235,26 @@ class Api:
         self.detection_cancel_event.set()
         return True
 
-    # ---------- worker threads ----------
-    def _run_sorter_then_maybe_detect(self, sorter_options, original_options, img_detect_enabled):
-        try:
-            self.sorter_stats = self.blur.main(**sorter_options) or {}
-        except TypeError:
-            # backend logic module may not yet accept keep_rejected — retry without it
-            sorter_options = {k: v for k, v in sorter_options.items() if k != "keep_rejected"}
-            try:
-                self.sorter_stats = self.blur.main(**sorter_options) or {}
-            except Exception as e:
-                print(f"Error in sorter: {e}")
-                self.sorter_stats = {}
-        except Exception as e:
-            print(f"Error in sorter: {e}")
-            self.sorter_stats = {}
+    # ---------- single unified worker ----------
 
-        if self.cancelled:
-            self._finish(cancelled=True)
-            return
+    def _run_worker(self, sorter_options, original_options, img_detect_enabled, solo):
+        if not solo:
+            self.sorter_stats = self._run_sorter(sorter_options)
+            if self.cancelled:
+                self._finish(cancelled=True)
+                return
 
-        if img_detect_enabled:
-            self._run_detection(original_options, solo=False)
+        if solo or img_detect_enabled:
+            self._run_detection(original_options, solo=solo)
         else:
             self._finish()
 
-    def _run_detection_only(self, original_options):
-        self._run_detection(original_options, solo=True)
+    def _run_sorter(self, sorter_options) -> dict:
+        try:
+            return self.blur.main(**sorter_options) or {}
+        except Exception as e:
+            print(f"Error in sorter: {e}")
+            return {}
 
     def _run_detection(self, original_options, solo):
         detection_options = {
@@ -299,10 +274,8 @@ class Api:
         self._finish(cancelled=self.cancelled)
 
     # ---------- progress plumbing ----------
-    def _make_progress_callback(self):
-        """Adapts the existing (current, total, stage_name) callback contract
-        from blur_sorter / detection into log lines + stat updates in the UI."""
 
+    def _make_progress_callback(self):
         def callback(current, total, stage_name="processing"):
             if current == -1:
                 self._push_progress(tag="sys", msg=f"{stage_name.replace('_', ' ')}...")
@@ -366,14 +339,17 @@ class Api:
         sorter = self.sorter_stats or {}
         detection = self.detection_stats or {}
 
-        if self.solo_detection:
-            total = next((detection.get(k) for k in ("total_images", "images_processed", "total") if detection.get(k) is not None), 0)
-            selected = next((detection.get(k) for k in ("selected_images", "rated_images", "final_selection") if detection.get(k) is not None), 0)
-            return {"total_images": total, "final_selection": selected}
+        # solo_detection path: sorter_stats is None, so read from detection
+        if not sorter:
+            return {
+                "total_images": _first(detection, "total_images", "images_processed", "total"),
+                "final_selection": _first(detection, "selected_images", "rated_images", "final_selection"),
+            }
 
-        total = next((sorter.get(k) for k in ("total_images", "images_processed") if sorter.get(k) is not None), 0)
-        selected = next((sorter.get(k) for k in ("final_selection", "sharp_images") if sorter.get(k) is not None), 0)
-        return {"total_images": total, "final_selection": selected}
+        return {
+            "total_images": _first(sorter, "total_images", "images_processed"),
+            "final_selection": _first(sorter, "final_selection", "sharp_images"),
+        }
 
 
 def main():
@@ -412,9 +388,8 @@ def main():
             print(f"splash push failed: {e}")
 
     def boot_sequence():
-        # this runs off the GUI thread so the splash stays animated/responsive
         push_boot("SYS", "loading saved settings ...")
-        time.sleep(0.15)  # let the line render before the next one lands
+        time.sleep(0.15)
 
         push_boot("SYS", "importing blur_sorter.py ...")
         blur, detect = import_logic_modules()
@@ -427,7 +402,7 @@ def main():
                 splash.evaluate_js("window.onBootComplete()")
             except Exception as e:
                 print(f"splash complete push failed: {e}")
-            time.sleep(0.3)  # brief pause so the "OK" line is readable
+            time.sleep(0.3)
             window.show()
             splash.destroy()
         else:
@@ -445,7 +420,6 @@ def main():
             except Exception as e:
                 print(f"splash error push failed: {e}")
             print("CRITICAL: backend logic modules failed to import. main window will not be shown.")
-            # splash stays open so the user can read the error; app exits when they close it
 
     def on_splash_loaded():
         threading.Thread(target=boot_sequence, daemon=True).start()
