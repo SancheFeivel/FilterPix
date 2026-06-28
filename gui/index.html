@@ -172,6 +172,9 @@ html,body{
 .btn.danger{border-color:#5c2a22; color:var(--red);}
 .btn.danger:hover{background:#1f1310;}
 .btn:disabled{opacity:0.35; cursor:not-allowed; pointer-events:none;}
+.btn.block{width:100%; justify-content:center;}
+.btn.ghost{border-color:var(--line-dim); color:var(--text-dim); font-size:11px; padding:6px 10px;}
+.btn.ghost:hover{color:var(--amber-hi); border-color:var(--amber-dim); background:#15161850;}
 
 /* ---------- main grid ---------- */
 .main{
@@ -193,7 +196,7 @@ html,body{
 
 .section-head{
   display:flex; align-items:center; gap:10px;
-  padding: 14px 16px 8px;
+  padding: 16px 16px 10px;
   font-size:11px; letter-spacing:0.14em; color:var(--text-dim);
 }
 .section-head::after{content:''; flex:1; height:1px; background:var(--line-dim);}
@@ -201,13 +204,13 @@ html,body{
 .rule{
   display:flex; align-items:flex-start; justify-content:space-between;
   gap:10px;
-  padding: 11px 16px;
+  padding: 12px 16px;
   border-bottom:1px solid var(--line-dim);
 }
 .rule:hover{background: rgba(255,157,46,0.025);}
-.rule-label{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.rule-label{display:flex; flex-direction:column; gap:3px; min-width:0;}
 .rule-name{font-size:13px; color:var(--text); font-weight:500; display:flex; align-items:center; gap:7px;}
-.rule-desc{font-size:11px; color:var(--text-dim); line-height:1.4;}
+.rule-desc{font-size:11px; color:var(--text-dim); line-height:1.45;}
 
 /* toggle: bracket style, like reference [F] Unfollow */
 .toggle{
@@ -227,7 +230,7 @@ html,body{
 .toggle:not(.on):hover{border-color:var(--amber-dim); color:var(--amber-hi);}
 
 .subgroup{
-  padding: 4px 16px 14px;
+  padding: 12px 16px 16px;
   display:flex; flex-direction:column; gap:10px;
   border-bottom:1px solid var(--line-dim);
 }
@@ -238,7 +241,7 @@ html,body{
 .segmented button{
   flex:1; background:transparent; border:none; border-right:1px solid var(--line);
   color:var(--text-dim); font-family:var(--font-mono); font-size:11px;
-  padding:5px 8px; cursor:pointer;
+  padding:5px 8px 4px; cursor:pointer;
 }
 .segmented button:last-child{border-right:none;}
 .segmented button.active{background:var(--amber); color:#1a1006; font-weight:600;}
@@ -247,19 +250,20 @@ html,body{
 .field{
   background: var(--bg); border:1px solid var(--line); color:var(--amber-hi);
   font-family:var(--font-mono); font-size:12px;
-  padding:5px 8px; width:64px; text-align:center;
+  padding:5px 8px 4px; width:64px; text-align:center;
 }
 .field:focus{outline:none; border-color:var(--amber-dim);}
 
 .disabled-overlay{opacity:0.32; pointer-events:none;}
 
 /* output destination */
-.dest-row{padding:12px 16px 16px; display:flex; flex-direction:column; gap:8px;}
+.dest-row{padding:14px 16px 18px; display:flex; flex-direction:column; gap:9px;}
 .dest-path{
   font-size:11px; color:var(--text-dim); background:var(--bg);
-  border:1px solid var(--line-dim); padding:6px 8px; word-break:break-all;
+  border:1px solid var(--line-dim); padding:7px 8px; word-break:break-all;
   min-height:16px;
 }
+.action-row{padding:14px 16px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--line-dim);}
 
 /* ---- right: viewport / log ---- */
 .viewport{
@@ -490,6 +494,11 @@ html,body{
       </div>
 
       <div class="pane" id="pane-output">
+
+        <div class="action-row">
+          <button class="btn ghost block" id="btnOpenOutput">&gt; open output folder</button>
+        </div>
+
         <div class="section-head">RESULT DESTINATION</div>
         <div class="rule">
           <div class="rule-label">
@@ -504,6 +513,15 @@ html,body{
             <button class="btn" id="btnOutputPick" style="font-size:10px; padding:4px 8px;">browse</button>
           </div>
           <div class="dest-path" id="outputPathDisplay">— inherits source folder —</div>
+        </div>
+
+        <div class="section-head">REJECTED FRAMES</div>
+        <div class="rule">
+          <div class="rule-label">
+            <div class="rule-name">keep rejected</div>
+            <div class="rule-desc">copies rejected frames to a "Rejected" folder instead of discarding</div>
+          </div>
+          <button class="toggle" data-toggle="keeprejected"><span class="b">[</span>OFF<span class="b">]</span></button>
         </div>
 
         <div class="section-head">SESSION</div>
@@ -587,6 +605,7 @@ const state = {
   sharpness: 0,
   tolerance: 0,
   detectionMode: 'fast',
+  keepRejected: false,
   isProcessing: false,
 };
 
@@ -636,6 +655,9 @@ $$('.toggle').forEach(btn=>{
       state.imgDetect = !state.imgDetect;
       setToggle(btn, state.imgDetect);
       $('#detect-sub').classList.toggle('disabled-overlay', !state.imgDetect);
+    } else if(key === 'keeprejected'){
+      state.keepRejected = !state.keepRejected;
+      setToggle(btn, state.keepRejected);
     } else if(key === 'defaultdest'){
       const usingDefault = !btn.classList.contains('on');
       setToggle(btn, usingDefault);
@@ -709,6 +731,17 @@ $('#btnOutputPick').addEventListener('click', async ()=>{
       const defBtn = document.querySelector('[data-toggle="defaultdest"]');
       setToggle(defBtn, false);
       pushConfigToBackend();
+    }
+  }
+});
+
+/* open output folder in OS file browser */
+$('#btnOpenOutput').addEventListener('click', async ()=>{
+  if(window.pywebview && window.pywebview.api && window.pywebview.api.open_folder){
+    const target = state.outputDir || state.folderPath;
+    const result = await window.pywebview.api.open_folder(target);
+    if(result && result.error){
+      logLine({cls:'sys', label:'SYS'}, `<span class="dim">could not open output folder: ${result.error}</span>`);
     }
   }
 });
@@ -801,6 +834,7 @@ async function runCull(){
         group_bursts: state.burst,
         img_detect: state.imgDetect,
         detection_mode: state.detectionMode,
+        keep_rejected: state.keepRejected,
       });
     }catch(err){
       logLine({cls:'drop', label:'ERR'}, 'backend call failed: ' + err);
@@ -885,6 +919,7 @@ function pushConfigToBackend(){
       sharpness_level: state.sharpness,
       tolerance: state.tolerance,
       detection_mode: state.detectionMode,
+      keep_rejected: state.keepRejected,
       last_folder: state.folderPath,
     });
   }
@@ -902,11 +937,13 @@ async function loadSettings(){
     state.sharpness = s.sharpness_level ?? 0;
     state.tolerance = s.tolerance ?? 0;
     state.detectionMode = s.detection_mode ?? 'fast';
+    state.keepRejected = s.keep_rejected ?? false;
 
     setToggle(document.querySelector('[data-toggle="laplacian"]'), state.laplacian);
     setToggle(document.querySelector('[data-toggle="star"]'), state.star);
     setToggle(document.querySelector('[data-toggle="burst"]'), state.burst);
     setToggle(document.querySelector('[data-toggle="imgdetect"]'), state.imgDetect);
+    setToggle(document.querySelector('[data-toggle="keeprejected"]'), state.keepRejected);
     $('#sharpness-sub').classList.toggle('disabled-overlay', !state.laplacian);
     $('#detect-sub').classList.toggle('disabled-overlay', !state.imgDetect);
 
@@ -924,11 +961,8 @@ async function loadSettings(){
     }
   }
 }
-if(window.pywebview){
-  loadSettings();
-} else {
-  window.addEventListener('pywebviewready', loadSettings);
-}
+loadSettings();
+
 /* ===================== browser-preview simulation ===================== */
 function simulateRun(){
   const total = 240;

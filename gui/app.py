@@ -99,6 +99,10 @@ class Api:
         self._rejected_count = 0
         self.detection_stats = None
 
+        self._scanned_count = 0
+        self._kept_count = 0
+        self._rejected_count = 0
+
         self.blur = None
         self.detect = None
 
@@ -189,6 +193,7 @@ class Api:
         self.cancelled = False
         self.sorter_stats = None
         self.detection_stats = None
+        self._scanned_count = 0
         self._kept_count = 0
         self._rejected_count = 0
         self.is_processing = True
@@ -276,34 +281,50 @@ class Api:
     # ---------- progress plumbing ----------
 
     def _make_progress_callback(self):
+        """Adapts the existing (current, total, stage_name) callback contract
+        from blur_sorter / detection into log lines + stat updates in the UI.
+        Counters are cumulative across stages, not reset per-stage."""
+
+        # which stage_names represent a KEEP / REJECT event per-item
+        KEEP_STAGES = {"copying_sharp"}
+        REJECT_STAGES = {"copying_rejected"}
+        # stages where current==total items have been freshly *scanned*
+        # (i.e. count toward the SCANNED stat as new items seen)
+        SCAN_STAGES = {"star_check", "sharpness_results", "score_results"}
+
         def callback(current, total, stage_name="processing"):
             if current == -1:
                 self._push_progress(tag="sys", msg=f"{stage_name.replace('_', ' ')}...")
                 return
 
-            payload = {
-                "percent": int((current / total) * 100) if total else None,
-                "msg": f"{stage_name.replace('_', ' ')}: {current}/{total}",
-            }
+            tag = "scan"
+            payload = {}
 
-            if stage_name == "copying_sharp":
-                self._kept_count = current
-                payload["tag"] = "keep"
+            if stage_name in KEEP_STAGES:
+                tag = "keep"
+                self._kept_count = current  # current IS the running copied count
                 payload["kept"] = self._kept_count
-                payload["scanned"] = self._kept_count + self._rejected_count
-            elif stage_name == "copying_rejected":
+            elif stage_name in REJECT_STAGES:
+                tag = "drop"
                 self._rejected_count = current
-                payload["tag"] = "drop"
                 payload["rejected"] = self._rejected_count
-                payload["scanned"] = self._kept_count + self._rejected_count
-            else:
-                payload["tag"] = "scan"
-                payload["scanned"] = current
+            elif stage_name in SCAN_STAGES:
+                # these stages fire once per image in order -> safe to treat
+                # current as "items scanned so far in this stage", but we only
+                # want it monotonic overall, so just mirror total_images scope
+                self._scanned_count = current
+                payload["scanned"] = self._scanned_count
+
+            percent = int((current / total) * 100) if total else None
+            if percent is not None:
+                payload["percent"] = percent
+            payload["tag"] = tag
+            payload["msg"] = f"{stage_name.replace('_', ' ')}: {current}/{total}"
 
             self._push_progress(**payload)
 
         return callback
-
+    
     def _push_progress(self, **payload):
         window = self._get_window()
         if not window:
