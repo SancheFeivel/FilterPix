@@ -98,6 +98,8 @@ class Api:
         self._kept_count = 0
         self._rejected_count = 0
         self.detection_stats = None
+        self._live_kept = 0
+        self._live_rejected = 0
 
         self._scanned_count = 0
         self._kept_count = 0
@@ -281,47 +283,28 @@ class Api:
     # ---------- progress plumbing ----------
 
     def _make_progress_callback(self):
-        """Adapts the existing (current, total, stage_name) callback contract
-        from blur_sorter / detection into log lines + stat updates in the UI.
-        Counters are cumulative across stages, not reset per-stage."""
-
-        # which stage_names represent a KEEP / REJECT event per-item
-        KEEP_STAGES = {"copying_sharp"}
-        REJECT_STAGES = {"copying_rejected"}
-        # stages where current==total items have been freshly *scanned*
-        # (i.e. count toward the SCANNED stat as new items seen)
-        SCAN_STAGES = {"star_check", "sharpness_results", "score_results"}
-
         def callback(current, total, stage_name="processing"):
             if current == -1:
                 self._push_progress(tag="sys", msg=f"{stage_name.replace('_', ' ')}...")
                 return
 
             tag = "scan"
-            payload = {}
-
-            if stage_name in KEEP_STAGES:
+            if stage_name in ("copying_sharp",):
                 tag = "keep"
-                self._kept_count = current  # current IS the running copied count
-                payload["kept"] = self._kept_count
-            elif stage_name in REJECT_STAGES:
+                self._live_kept = current
+            elif stage_name in ("copying_rejected",):
                 tag = "drop"
-                self._rejected_count = current
-                payload["rejected"] = self._rejected_count
-            elif stage_name in SCAN_STAGES:
-                # these stages fire once per image in order -> safe to treat
-                # current as "items scanned so far in this stage", but we only
-                # want it monotonic overall, so just mirror total_images scope
-                self._scanned_count = current
-                payload["scanned"] = self._scanned_count
+                self._live_rejected = current
 
             percent = int((current / total) * 100) if total else None
-            if percent is not None:
-                payload["percent"] = percent
-            payload["tag"] = tag
-            payload["msg"] = f"{stage_name.replace('_', ' ')}: {current}/{total}"
-
-            self._push_progress(**payload)
+            self._push_progress(
+                scanned=current,
+                kept=self._live_kept,
+                rejected=self._live_rejected,
+                percent=percent,
+                tag=tag,
+                msg=f"{stage_name.replace('_', ' ')}: {current}/{total}",
+            )
 
         return callback
     
@@ -340,10 +323,14 @@ class Api:
         elapsed = time.time() - (self._start_time or time.time())
         rejected = max(stats["total_images"] - stats["final_selection"], 0)
 
+        self._live_kept = stats["final_selection"]
+        self._live_rejected = max(stats["total_images"] - stats["final_selection"], 0)
+        self._push_progress(kept=self._live_kept, rejected=self._live_rejected)
+
         result = {
             "kept": stats["final_selection"],
             "total": stats["total_images"],
-            "rejected": rejected,
+            "rejected": max(stats["total_images"] - stats["final_selection"], 0),
             "elapsed": elapsed,
             "cancelled": cancelled,
         }

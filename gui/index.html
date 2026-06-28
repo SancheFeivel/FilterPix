@@ -946,6 +946,10 @@ window.onCullProgress = function(payload){
   }
 };
 window.onCullComplete = function(result){
+  if(result){
+    if(result.kept !== undefined) $('#statKept').textContent = result.kept;
+    if(result.rejected !== undefined) $('#statRejected').textContent = result.rejected;
+  }
   finishCull(result || {});
 };
 
