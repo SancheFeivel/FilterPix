@@ -175,6 +175,11 @@ html,body{
 .btn.block{width:100%; justify-content:center;}
 .btn.ghost{border-color:var(--line-dim); color:var(--text-dim); font-size:11px; padding:6px 10px;}
 .btn.ghost:hover{color:var(--amber-hi); border-color:var(--amber-dim); background:#15161850;}
+.btn.ghost.target{
+  background: var(--amber); color:#1a1006; border-color:var(--amber);
+  font-weight:600; font-size:12px; padding:7px 12px;
+}
+.btn.ghost.target:hover{background: var(--amber-hi); border-color:var(--amber-hi);}
 
 /* ---------- main grid ---------- */
 .main{
@@ -263,7 +268,6 @@ html,body{
   border:1px solid var(--line-dim); padding:7px 8px; word-break:break-all;
   min-height:16px;
 }
-.action-row{padding:14px 16px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--line-dim);}
 
 /* ---- right: viewport / log ---- */
 .viewport{
@@ -495,10 +499,6 @@ html,body{
 
       <div class="pane" id="pane-output">
 
-        <div class="action-row">
-          <button class="btn ghost block" id="btnOpenOutput">&gt; open output folder</button>
-        </div>
-
         <div class="section-head">RESULT DESTINATION</div>
         <div class="rule">
           <div class="rule-label">
@@ -507,12 +507,9 @@ html,body{
           </div>
           <button class="toggle on" data-toggle="defaultdest"><span class="b">[</span>ON<span class="b">]</span></button>
         </div>
-        <div class="dest-row">
-          <div class="subrow">
-            <span class="subrow-label">custom output path</span>
-            <button class="btn" id="btnOutputPick" style="font-size:10px; padding:4px 8px;">browse</button>
-          </div>
+        <div class="dest-row" style="gap:8px; border-bottom:1px solid var(--line-dim);">
           <div class="dest-path" id="outputPathDisplay">— inherits source folder —</div>
+          <button class="btn ghost block" id="btnOpenOutput"><span class="key">W</span> open output folder</button>
         </div>
 
         <div class="section-head">REJECTED FRAMES</div>
@@ -583,6 +580,7 @@ html,body{
       <span class="hint"><kbd>↵</kbd>run</span>
       <span class="hint"><kbd>ESC</kbd>abort</span>
       <span class="hint"><kbd>TAB</kbd>switch pane</span>
+      <span class="hint"><kbd>W</kbd>open output</span>
     </div>
     <div class="session" id="footerStatus">idle</div>
   </div>
@@ -664,7 +662,13 @@ $$('.toggle').forEach(btn=>{
       if(usingDefault){
         state.outputDir = null;
         $('#outputPathDisplay').textContent = '— inherits source folder —';
+        updateOpenOutputButton();
+        pushConfigToBackend();
+      } else {
+        // turned off — prompt user to pick a folder
+        selectOutputFolder();
       }
+      return;
     }
     pushConfigToBackend();
   });
@@ -716,24 +720,48 @@ function applyFolder(folder){
   if(!state.outputDir){
     $('#outputPathDisplay').textContent = '— inherits source folder —';
   }
+  updateOpenOutputButton();
   pushConfigToBackend();
+}
+
+function updateOpenOutputButton(){
+  const btn = $('#btnOpenOutput');
+  if(!btn) return;
+  const hasTarget = !!(state.outputDir || state.folderPath);
+  btn.classList.toggle('target', hasTarget);
 }
 
 $('#btnSelect').addEventListener('click', selectFolder);
 
-$('#btnOutputPick').addEventListener('click', async ()=>{
+async function selectOutputFolder(){
   if(window.pywebview && window.pywebview.api && window.pywebview.api.select_output_folder){
     const folder = await window.pywebview.api.select_output_folder();
     if(folder){
       state.outputDir = folder;
       $('#outputPathDisplay').textContent = folder;
-      // flip the "use source folder" toggle off
       const defBtn = document.querySelector('[data-toggle="defaultdest"]');
       setToggle(defBtn, false);
+      updateOpenOutputButton();
       pushConfigToBackend();
+    } else {
+      // user cancelled picker - revert toggle to ON
+      const defBtn = document.querySelector('[data-toggle="defaultdest"]');
+      setToggle(defBtn, true);
+      state.outputDir = null;
+      $('#outputPathDisplay').textContent = '— inherits source folder —';
+      updateOpenOutputButton();
     }
+  } else {
+    // browser preview fallback
+    const fake = '/Users/demo/shoots/wedding_oct_2025_culled';
+    state.outputDir = fake;
+    $('#outputPathDisplay').textContent = fake;
+    const defBtn = document.querySelector('[data-toggle="defaultdest"]');
+    setToggle(defBtn, false);
+    updateOpenOutputButton();
+    pushConfigToBackend();
   }
-});
+}
 
 /* open output folder in OS file browser */
 $('#btnOpenOutput').addEventListener('click', async ()=>{
@@ -857,10 +885,19 @@ function finishCull(result){
   } else if(result.cancelled){
     logLine({cls:'sys', label:'SYS'}, 'cull aborted by user.');
     $('#footerStatus').textContent = 'aborted';
+    switchToOutputTab();
   } else {
     logLine({cls:'sys', label:'SYS'}, `done. ${kept}/${total} frames kept. output written to <span class="dim">${state.outputDir || state.folderPath + '/_culled'}</span>`);
     $('#footerStatus').textContent = `complete — ${kept}/${total} kept`;
     $('#lastDuration').textContent = fmtElapsed(elapsedSeconds);
+    switchToOutputTab();
+  }
+}
+
+function switchToOutputTab(){
+  const outputTab = document.querySelector('.tab[data-pane="output"]');
+  if(outputTab && !outputTab.classList.contains('active')){
+    outputTab.click();
   }
 }
 
@@ -877,6 +914,7 @@ document.addEventListener('keydown', (e)=>{
   if(e.key === 'F2'){ e.preventDefault(); selectFolder(); }
   if(e.key === 'Enter' && !state.isProcessing){ runCull(); }
   if(e.key === 'Escape' && state.isProcessing){ $('#btnCancel').click(); }
+  if(e.key === 'w' || e.key === 'W'){ e.preventDefault(); $('#btnOpenOutput').click(); }
   if(e.key === 'Tab'){
     e.preventDefault();
     const tabs = [...$$('.tab')];
@@ -959,6 +997,8 @@ async function loadSettings(){
       const defBtn = document.querySelector('[data-toggle="defaultdest"]');
       setToggle(defBtn, false);
     }
+
+    updateOpenOutputButton();
   }
 }
 loadSettings();
