@@ -95,15 +95,10 @@ class Api:
         self.cancelled = False
 
         self.sorter_stats = None
-        self._kept_count = 0
-        self._rejected_count = 0
         self.detection_stats = None
+        self._scanned_count = 0
         self._live_kept = 0
         self._live_rejected = 0
-
-        self._scanned_count = 0
-        self._kept_count = 0
-        self._rejected_count = 0
 
         self.blur = None
         self.detect = None
@@ -196,8 +191,8 @@ class Api:
         self.sorter_stats = None
         self.detection_stats = None
         self._scanned_count = 0
-        self._kept_count = 0
-        self._rejected_count = 0
+        self._live_kept = 0
+        self._live_rejected = 0
         self.is_processing = True
         self._start_time = time.time()
 
@@ -207,7 +202,6 @@ class Api:
         img_detect_enabled = options.get("img_detect", False)
         keep_rejected = options.get("keep_rejected", False)
 
-        # True when the caller wants detection but no sorter passes at all.
         solo = not (star_enabled or laplacian_enabled or burst_enabled)
 
         sorter_options = {
@@ -283,9 +277,14 @@ class Api:
     # ---------- progress plumbing ----------
 
     def _make_progress_callback(self):
-        def callback(current, total, stage_name="processing"):
+        def callback(current, total, stage_name="processing", extra=None):
             if current == -1:
                 self._push_progress(tag="sys", msg=f"{stage_name.replace('_', ' ')}...")
+                return
+
+            if stage_name == "rejected_known":
+                self._live_rejected = current
+                self._push_progress(scanned=self._scanned_count, kept=self._live_kept, rejected=self._live_rejected)
                 return
 
             tag = "scan"
@@ -294,11 +293,18 @@ class Api:
                 self._live_kept = current
             elif stage_name in ("copying_rejected",):
                 tag = "drop"
-                self._live_rejected = current
+                self._live_rejected = max(self._live_rejected, current)
+            elif stage_name in ("sharpness_results",) and extra:
+                self._scanned_count = max(self._scanned_count, current)
+                self._live_rejected = max(self._live_rejected, extra.get("rejected", 0))
+            elif stage_name in ("processing_bursts",) and extra:
+                self._live_rejected = max(self._live_rejected, extra.get("rejected", 0))
+            else:
+                self._scanned_count = max(self._scanned_count, current)
 
             percent = int((current / total) * 100) if total else None
             self._push_progress(
-                scanned=current,
+                scanned=self._scanned_count,
                 kept=self._live_kept,
                 rejected=self._live_rejected,
                 percent=percent,
@@ -319,23 +325,30 @@ class Api:
 
     def _finish(self, cancelled=False):
         self.is_processing = False
-        stats = self._compute_final_stats()
-        elapsed = time.time() - (self._start_time or time.time())
-        rejected = max(stats["total_images"] - stats["final_selection"], 0)
 
-        self._live_kept = stats["final_selection"]
-        self._live_rejected = max(stats["total_images"] - stats["final_selection"], 0)
-        self._push_progress(kept=self._live_kept, rejected=self._live_rejected)
+        if cancelled:
+            kept = self._live_kept
+            rejected = self._live_rejected
+            total = self._scanned_count
+        else:
+            stats = self._compute_final_stats()
+            kept = stats["final_selection"]
+            total = stats["total_images"]
+            rejected = max(total - kept, 0)
+            self._live_kept = kept
+            self._live_rejected = rejected
+
+        elapsed = time.time() - (self._start_time or time.time())
 
         result = {
-            "kept": stats["final_selection"],
-            "total": stats["total_images"],
-            "rejected": max(stats["total_images"] - stats["final_selection"], 0),
+            "kept": kept,
+            "total": total,
+            "rejected": rejected,
             "elapsed": elapsed,
             "cancelled": cancelled,
         }
 
-        self._push_progress(kept=stats["final_selection"], rejected=rejected)
+        self._push_progress(scanned=self._scanned_count, kept=kept, rejected=rejected)
 
         window = self._get_window()
         if window:

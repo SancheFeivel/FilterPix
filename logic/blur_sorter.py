@@ -554,7 +554,7 @@ class ImageSharpnessProcessor:
             else:
                 blurry_count += 1
             if self.progress_callback:
-                self.progress_callback(idx, len(results), "sharpness_results")
+                self.progress_callback(idx, len(results), "sharpness_results", extra={"rejected": blurry_count})
 
         self.stats['sharp_images'] = sharp_count
         print(f"Sharpness check complete: {sharp_count} sharp, {blurry_count} blurry (filtered)")
@@ -603,6 +603,7 @@ class ImageSharpnessProcessor:
 
     def stage3_burst_grouping(self, sharp_images):
         print("\nSTAGE 3: Burst Grouping")
+        burst_dropped = 0
         if not sharp_images:
             print("No sharp images to process.")
             return []
@@ -671,6 +672,8 @@ class ImageSharpnessProcessor:
             
             for i, (score, path) in enumerate(scored):
                 marker = "V KEEP" if i < self.burst_count else "X DROP"
+                if i >= self.burst_count:
+                    burst_dropped += 1
                 print(f"  {marker} {os.path.basename(path)} (sharpness: {score:.1f})")
 
             for score, path in selected_from_burst:
@@ -678,7 +681,7 @@ class ImageSharpnessProcessor:
                 images_from_bursts += 1
             
             if self.progress_callback:
-                self.progress_callback(burst_num, total_bursts, "processing_bursts")
+                self.progress_callback(burst_num, total_bursts, "processing_bursts", extra={"rejected": burst_dropped})
 
         final_selection.extend(non_burst_images)
         self.stats['final_selection'] = len(final_selection)
@@ -717,6 +720,9 @@ class ImageSharpnessProcessor:
                     print(f"Error copying {path}: {e}")
 
             rejected_images = [f for f in all_images if f not in final_basenames]
+
+            if self.progress_callback:
+                self.progress_callback(len(rejected_images), len(rejected_images), "rejected_known")
 
             if keep_rejected:
                 rejected_folder = os.path.join(base_output, "Rejected")
