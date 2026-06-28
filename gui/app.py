@@ -338,14 +338,17 @@ class Api:
         self.is_processing = False
         stats = self._compute_final_stats()
         elapsed = time.time() - (self._start_time or time.time())
+        rejected = max(stats["total_images"] - stats["final_selection"], 0)
 
         result = {
             "kept": stats["final_selection"],
             "total": stats["total_images"],
-            "rejected": max(stats["total_images"] - stats["final_selection"], 0),
+            "rejected": rejected,
             "elapsed": elapsed,
             "cancelled": cancelled,
         }
+
+        self._push_progress(kept=stats["final_selection"], rejected=rejected)
 
         window = self._get_window()
         if window:

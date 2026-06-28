@@ -927,6 +927,8 @@ document.addEventListener('keydown', (e)=>{
 /* Python side calls: window.onCullProgress({scanned, kept, rejected, stage, tag, msg}) */
 window.onCullProgress = function(payload){
   if(payload.scanned !== undefined) $('#statScanned').textContent = payload.scanned;
+  if(payload.tag === 'keep') $('#statKept').textContent = (parseInt($('#statKept').textContent,10)||0) + 1;
+  if(payload.tag === 'drop') $('#statRejected').textContent = (parseInt($('#statRejected').textContent,10)||0) + 1;
   if(payload.kept !== undefined) $('#statKept').textContent = payload.kept;
   if(payload.rejected !== undefined) $('#statRejected').textContent = payload.rejected;
   if(payload.percent !== undefined){
@@ -1001,7 +1003,12 @@ async function loadSettings(){
     updateOpenOutputButton();
   }
 }
-loadSettings();
+function bootLoad(){ loadSettings(); }
+if (window.pywebview && window.pywebview.api) {
+  bootLoad();
+} else {
+  window.addEventListener('pywebviewready', bootLoad, { once: true });
+}
 
 /* ===================== browser-preview simulation ===================== */
 function simulateRun(){
