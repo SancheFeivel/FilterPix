@@ -10,17 +10,8 @@ from PIL.ExifTags import TAGS
 from collections import defaultdict
 import numpy as np
 
-# ── Multiprocessing safety (required for PyInstaller + Windows/macOS) ─────────
-# Must be called once at app startup, before any Pool is created.
-def init_multiprocessing():
-    multiprocessing.freeze_support()
-    method = multiprocessing.get_start_method(allow_none=True)
-    print(f"DEBUG INIT: current start method = {method!r}")
-    if method is None:
-        multiprocessing.set_start_method('spawn')
-        print("DEBUG INIT: start method set to 'spawn'")
-    else:
-        print(f"DEBUG INIT: start method already set, leaving as {method!r}")
+SUPPORTED_EXTS = ('.jpg', '.jpeg')
+
 
 def _pool_initializer():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -332,7 +323,7 @@ class ImageAnalyzer:
 
 
 def process_image_sharpness(folder, filename, base_blur, tolerance, exif_cache):
-    if not filename.lower().endswith(".jpg"):
+    if not filename.lower().endswith(SUPPORTED_EXTS):
         return None
 
     path = os.path.join(folder, filename)
@@ -393,7 +384,7 @@ def _run_pool(args, cancel_flag, progress_callback, stage_name, pool_timeout=300
         print(f"DEBUG POOL [{stage_name}]: pool created, dispatching starmap_async")
         result_async = pool.starmap_async(process_image_sharpness, args)
         total = len(args)
-        elapsed = 0
+        ticks = 0
 
         while not result_async.ready():
             if cancel_flag and cancel_flag.is_set():
@@ -407,9 +398,9 @@ def _run_pool(args, cancel_flag, progress_callback, stage_name, pool_timeout=300
                 progress_callback(-1, total, stage_name)
 
             time.sleep(0.5)
-            elapsed += 0.5
-            if elapsed % 10 == 0:
-                print(f"DEBUG POOL [{stage_name}]: still waiting... {elapsed:.0f}s elapsed")
+            ticks += 1
+            if ticks % 20 == 0:
+                print(f"DEBUG POOL [{stage_name}]: still waiting... {ticks * 0.5:.0f}s elapsed")
 
         print(f"DEBUG POOL [{stage_name}]: result_async ready, calling .get(timeout={pool_timeout})")
         try:
@@ -440,16 +431,7 @@ class ImageSharpnessProcessor:
         self.exif_cache = {}
         self.laplacian_map = {}
         
-        self.stats = {
-            'total_images': 0,
-            'rated_images': 0,
-            'sharp_images': 0,
-            'final_selection': 0,
-            'copied_images': 0,
-            'start_time': None,
-            'end_time': None,
-            'elapsed_time': 0
-        }
+        self.stats = {}
 
     def cache_exif(self, path):
         if path in self.exif_cache:
@@ -656,7 +638,7 @@ class ImageSharpnessProcessor:
         print(f"Actual burst groups (>1 image): {len(actual_bursts)}")
         print(f"Non-burst images: {len(non_burst_images)}")
 
-        final_selection, images_from_bursts = [], 0
+        final_selection = []
         total_bursts = len(actual_bursts)
         
         for burst_num, (dt, group) in enumerate(actual_bursts.items(), 1):
@@ -678,7 +660,6 @@ class ImageSharpnessProcessor:
 
             for score, path in selected_from_burst:
                 final_selection.append(path)
-                images_from_bursts += 1
             
             if self.progress_callback:
                 self.progress_callback(burst_num, total_bursts, "processing_bursts", extra={"rejected": burst_dropped})
@@ -770,7 +751,7 @@ class ImageSharpnessProcessor:
         if output_folder is None:
             output_folder = self.folder
 
-        all_images = [f for f in os.listdir(self.folder) if f.lower().endswith(".jpg")]
+        all_images = [f for f in os.listdir(self.folder) if f.lower().endswith(SUPPORTED_EXTS)]
         self.stats['total_images'] = len(all_images)
         print(f"Found {len(all_images)} JPG files to process")
 

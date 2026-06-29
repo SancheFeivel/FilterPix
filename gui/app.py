@@ -96,9 +96,7 @@ class Api:
 
         self.sorter_stats = None
         self.detection_stats = None
-        self._scanned_count = 0
-        self._live_kept = 0
-        self._live_rejected = 0
+        self._progress = {"scanned": 0, "kept": 0, "rejected": 0}
 
         self.blur = None
         self.detect = None
@@ -190,9 +188,7 @@ class Api:
         self.cancelled = False
         self.sorter_stats = None
         self.detection_stats = None
-        self._scanned_count = 0
-        self._live_kept = 0
-        self._live_rejected = 0
+        self._progress = {"scanned": 0, "kept": 0, "rejected": 0}
         self.is_processing = True
         self._start_time = time.time()
 
@@ -276,6 +272,13 @@ class Api:
 
     # ---------- progress plumbing ----------
 
+    # stage_name -> (progress dict key to set, log tag). "scanned" is the
+    # default key/tag for anything not listed here.
+    _STAGE_MAP = {
+        "copying_sharp":     ("kept", "keep"),
+        "copying_rejected":  ("rejected", "drop"),
+    }
+
     def _make_progress_callback(self):
         def callback(current, total, stage_name="processing", extra=None):
             if current == -1:
@@ -283,30 +286,19 @@ class Api:
                 return
 
             if stage_name == "rejected_known":
-                self._live_rejected = current
-                self._push_progress(scanned=self._scanned_count, kept=self._live_kept, rejected=self._live_rejected)
+                self._progress["rejected"] = current
+                self._push_progress(**self._progress)
                 return
 
-            tag = "scan"
-            if stage_name in ("copying_sharp",):
-                tag = "keep"
-                self._live_kept = current
-            elif stage_name in ("copying_rejected",):
-                tag = "drop"
-                self._live_rejected = max(self._live_rejected, current)
-            elif stage_name in ("sharpness_results",) and extra:
-                self._scanned_count = max(self._scanned_count, current)
-                self._live_rejected = max(self._live_rejected, extra.get("rejected", 0))
-            elif stage_name in ("processing_bursts",) and extra:
-                self._live_rejected = max(self._live_rejected, extra.get("rejected", 0))
-            else:
-                self._scanned_count = max(self._scanned_count, current)
+            key, tag = self._STAGE_MAP.get(stage_name, ("scanned", "scan"))
+            self._progress[key] = max(self._progress[key], current)
+
+            if extra and stage_name in ("sharpness_results", "processing_bursts"):
+                self._progress["rejected"] = max(self._progress["rejected"], extra.get("rejected", 0))
 
             percent = int((current / total) * 100) if total else None
             self._push_progress(
-                scanned=self._scanned_count,
-                kept=self._live_kept,
-                rejected=self._live_rejected,
+                **self._progress,
                 percent=percent,
                 tag=tag,
                 msg=f"{stage_name.replace('_', ' ')}: {current}/{total}",
@@ -327,16 +319,16 @@ class Api:
         self.is_processing = False
 
         if cancelled:
-            kept = self._live_kept
-            rejected = self._live_rejected
-            total = self._scanned_count
+            kept = self._progress["kept"]
+            rejected = self._progress["rejected"]
+            total = self._progress["scanned"]
         else:
             stats = self._compute_final_stats()
             kept = stats["final_selection"]
             total = stats["total_images"]
             rejected = max(total - kept, 0)
-            self._live_kept = kept
-            self._live_rejected = rejected
+            self._progress["kept"] = kept
+            self._progress["rejected"] = rejected
 
         elapsed = time.time() - (self._start_time or time.time())
 
@@ -348,7 +340,7 @@ class Api:
             "cancelled": cancelled,
         }
 
-        self._push_progress(scanned=self._scanned_count, kept=kept, rejected=rejected)
+        self._push_progress(**self._progress)
 
         window = self._get_window()
         if window:
