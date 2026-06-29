@@ -169,6 +169,7 @@ html,body{
   font-weight:600;
 }
 .btn.primary:hover{background: var(--amber-hi); border-color:var(--amber-hi);}
+.btn.primary .key{color:#1a1006; border-color:rgba(26,16,6,0.35);}
 .btn.danger{border-color:#5c2a22; color:var(--red);}
 .btn.danger:hover{background:#1f1310;}
 .btn:disabled{opacity:0.35; cursor:not-allowed; pointer-events:none;}
@@ -180,6 +181,7 @@ html,body{
   font-weight:600; font-size:12px; padding:7px 12px;
 }
 .btn.ghost.target:hover{background: var(--amber-hi); border-color:var(--amber-hi);}
+.btn.ghost.target .key{color:#1a1006; border-color:rgba(26,16,6,0.35);}
 
 /* ---------- main grid ---------- */
 .main{
@@ -193,11 +195,15 @@ html,body{
   display:flex; flex-direction:column;
   border-right:1px solid var(--line);
   background: var(--panel);
-  overflow-y:auto;
+  min-height:0;
 }
-.console::-webkit-scrollbar{width:8px;}
-.console::-webkit-scrollbar-thumb{background:var(--line); }
-.console::-webkit-scrollbar-track{background:transparent;}
+
+.console-scroll{
+  flex:1; min-height:0; overflow-y:auto;
+}
+.console-scroll::-webkit-scrollbar{width:8px;}
+.console-scroll::-webkit-scrollbar-thumb{background:var(--line); }
+.console-scroll::-webkit-scrollbar-track{background:transparent;}
 
 .section-head{
   display:flex; align-items:center; gap:10px;
@@ -313,7 +319,7 @@ html,body{
 .log-tag.keep{color:var(--green);}
 .log-tag.drop{color:var(--red);}
 .log-tag.sys{color:var(--amber-hi);}
-.log-msg{color:var(--text);}
+.log-msg{color:var(--text); flex:1; min-width:0; word-break:break-word;}
 .log-msg .dim{color:var(--text-dim);}
 
 .idle-banner{
@@ -361,7 +367,7 @@ html,body{
   padding:0px 4px; margin-right:5px; font-size:10px;
 }
 .footer .hint{color:var(--text-dim);}
-.footer .session{color:#48484c;}
+.footer .session{color:var(--amber-hi);}
 
 /* settings drawer (slides over console area when open is toggled via tab) */
 .tabs{
@@ -434,6 +440,8 @@ html,body{
         <div class="tab active" data-pane="rules">RULES</div>
         <div class="tab" data-pane="output">OUTPUT</div>
       </div>
+
+      <div class="console-scroll">
 
       <div class="pane active" id="pane-rules">
         <div class="section-head">DETECTION FILTERS</div>
@@ -532,6 +540,8 @@ html,body{
             <span style="color:var(--green); font-size:11px;">✓ auto</span>
           </div>
         </div>
+      </div>
+
       </div>
 
     </div>
@@ -703,6 +713,7 @@ $('#toleranceField').addEventListener('change', (e)=>{
 
 /* ===================== folder selection ===================== */
 async function selectFolder(){
+  if(state.isProcessing) return;
   if(window.pywebview && window.pywebview.api && window.pywebview.api.select_folder){
     const folder = await window.pywebview.api.select_folder();
     if(folder){ applyFolder(folder); }
@@ -825,6 +836,7 @@ function setProcessingUI(isProcessing){
   state.isProcessing = isProcessing;
   $('#btnRun').style.display = isProcessing ? 'none' : 'inline-flex';
   $('#btnCancel').style.display = isProcessing ? 'inline-flex' : 'none';
+  $('#btnSelect').disabled = isProcessing;
   $('#footerStatus').textContent = isProcessing ? 'running cull operation...' : 'idle';
   $('#progressFill').classList.toggle('indeterminate', isProcessing);
   if(!isProcessing){
