@@ -42,19 +42,19 @@
 }
 
 :root{
-  --bg:        #08090a;
-  --panel:     #0e0f11;
-  --panel-2:   #131416;
-  --line:      #26282b;
-  --line-dim:  #1a1b1d;
-  --amber:     #ff9d2e;
-  --amber-hi:  #ffc873;
-  --amber-dim: #8a7355;
-  --amber-ghost: #3a3530;
-  --red:       #ff5d4a;
-  --green:     #8fd14f;
-  --text:      #c9cacc;
-  --text-dim:  #6c6e72;
+  --bg:        #0a0a0f;
+  --panel:     #101018;
+  --panel-2:   #15151f;
+  --line:      #2a2a38;
+  --line-dim:  #1c1c26;
+  --amber:     #7c6cff;
+  --amber-hi:  #a9a0ff;
+  --amber-dim: #6558a8;
+  --amber-ghost:#332f52;
+  --red:       #ff5d8a;
+  --green:     #6ce09a;
+  --text:      #cacadd;
+  --text-dim:  #6e6e85;
   --scanline-op: 0.035;
 
   --font-mono: 'IBM Plex Mono', monospace;
@@ -412,7 +412,7 @@ html,body{
       <div class="dot"></div><div class="dot"></div><div class="dot"></div>
     </div>
     <div class="brand">FILTERPIX</div>
-    <div class="ver">v1.0.8 // image culling engine</div>
+    <div class="ver">v1.4.4 // image culling engine</div>
   </div>
 
   <!-- prompt bar: folder select + run controls -->
@@ -900,7 +900,7 @@ function finishCull(result){
     $('#footerStatus').textContent = 'aborted';
     switchToOutputTab();
   } else {
-    logLine({cls:'sys', label:'SYS'}, `done. ${kept}/${total} frames kept. output written to <span class="dim">${state.outputDir || state.folderPath + '/_culled'}</span>`);
+    logLine({cls:'sys', label:'SYS'}, `done. ${kept}/${total} frames kept. output written to <span class="dim">${state.outputDir || state.folderPath + '\\sharp'}</span>`);
     $('#footerStatus').textContent = `complete — ${kept}/${total} kept`;
     $('#lastDuration').textContent = fmtElapsed(elapsedSeconds);
     switchToOutputTab();
@@ -978,6 +978,7 @@ function pushConfigToBackend(){
       detection_mode: state.detectionMode,
       keep_rejected: state.keepRejected,
       last_folder: state.folderPath,
+      output_directory: state.outputDir,
     });
   }
 }

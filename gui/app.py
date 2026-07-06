@@ -388,7 +388,7 @@ def main():
         "FilterPix",
         str(HTML_PATH),
         js_api=api,
-        width=1000,
+        width=1040,
         height=680,
         resizable=True,
         min_size=(900, 600),
