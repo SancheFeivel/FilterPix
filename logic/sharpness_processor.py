@@ -28,20 +28,7 @@ class ImageSharpnessProcessor:
         if path in self.exif_cache:
             return self.exif_cache[path]
         with timed("cache_exif"):
-            fstop = EXIFHelper.get_fstop(path)
-            iso = EXIFHelper.get_iso(path)
-            shutter = EXIFHelper.get_shutter_speed(path)
-            rating = EXIFHelper.get_rating(path)
-            dt = EXIFHelper.get_datetime_original(path)
-            subsec = EXIFHelper.get_subsec_time(path)
-            self.exif_cache[path] = {
-                'fstop': fstop,
-                'iso': iso,
-                'shutter': shutter,
-                'rating': rating,
-                'datetime': dt,
-                'subsec': subsec
-            }
+            self.exif_cache[path] = EXIFHelper.parse(EXIFHelper.read_all(path))
         return self.exif_cache[path]
 
     def cancel(self):
@@ -314,7 +301,7 @@ class ImageSharpnessProcessor:
                     source_path = os.path.join(self.folder, filename)
                     dest_path = os.path.join(rejected_folder, filename)
                     with timed("shutil_copy"):
-                        shutil.copy(path, dest_path)
+                        shutil.copy(source_path, dest_path)
                     rejected_count += 1
                     print(f"Copied to Rejected: {filename}")
                     if self.progress_callback:

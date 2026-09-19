@@ -2,38 +2,57 @@ from PIL import Image
 from PIL.ExifTags import TAGS
 
 
+def _ratio(v):
+    return float(v[0]) / float(v[1]) if isinstance(v, tuple) else float(v)
+
+
 class EXIFHelper:
     @staticmethod
-    def get_exif_value(path, key, default=None):
+    def read_all(path):
+        """One open, one parse. Returns {tag_name: value}, {} on failure."""
         try:
             with Image.open(path) as img:
-                exif_data = img._getexif()
-                if not exif_data:
-                    return default
-                for tag_id, value in exif_data.items():
-                    tag = TAGS.get(tag_id, tag_id)
-                    if tag == key:
-                        return value
+                raw = img._getexif() or {}
         except Exception as e:
-            print(f"Error reading {key} from {path}: {e}")
-        return default
+            print(f"Error reading EXIF from {path}: {e}")
+            return {}
+        return {TAGS.get(k, k): v for k, v in raw.items()}
+
+    @staticmethod
+    def parse(exif):
+        """Turn read_all() dict into the fields the sorter uses."""
+        fstop = 8.0
+        try:
+            fstop = _ratio(exif['FNumber'])
+        except Exception:
+            try:
+                fstop = 2 ** (_ratio(exif['ApertureValue']) / 2)
+            except Exception:
+                pass
+
+        try:
+            rating = int(exif['Rating'])
+        except (KeyError, ValueError, TypeError):
+            rating = None
+
+        return {
+            'fstop': fstop,
+            'iso': exif.get('ISOSpeedRatings', 100),
+            'shutter': exif.get('ExposureTime'),
+            'rating': rating,
+            'datetime': exif.get('DateTimeOriginal'),
+            'subsec': exif.get('SubSecTimeOriginal', '00'),
+        }
+
+    # --- legacy single-value getters (each still opens the file once) ---
+
+    @staticmethod
+    def get_exif_value(path, key, default=None):
+        return EXIFHelper.read_all(path).get(key, default)
 
     @staticmethod
     def get_fstop(path):
-        value = EXIFHelper.get_exif_value(path, 'FNumber', None)
-        if value is not None:
-            try:
-                return float(value[0]) / float(value[1]) if isinstance(value, tuple) else float(value)
-            except Exception:
-                pass
-        apex = EXIFHelper.get_exif_value(path, 'ApertureValue', None)
-        if apex is not None:
-            try:
-                apex_val = float(apex[0]) / float(apex[1]) if isinstance(apex, tuple) else float(apex)
-                return 2 ** (apex_val / 2)
-            except Exception:
-                pass
-        return 8.0
+        return EXIFHelper.parse(EXIFHelper.read_all(path))['fstop']
 
     @staticmethod
     def get_shutter_speed(path):
@@ -45,13 +64,7 @@ class EXIFHelper:
 
     @staticmethod
     def get_rating(path):
-        rating = EXIFHelper.get_exif_value(path, 'Rating', None)
-        if rating is None:
-            return None
-        try:
-            return int(rating)
-        except (ValueError, TypeError):
-            return None
+        return EXIFHelper.parse(EXIFHelper.read_all(path))['rating']
 
     @staticmethod
     def get_datetime_original(path):
