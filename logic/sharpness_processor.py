@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from exif_helper import EXIFHelper
 from pool_worker import run_pool
+from timing import timed, report
 
 SUPPORTED_EXTS = ('.jpg', '.jpeg')
 
@@ -26,20 +27,21 @@ class ImageSharpnessProcessor:
     def cache_exif(self, path):
         if path in self.exif_cache:
             return self.exif_cache[path]
-        fstop = EXIFHelper.get_fstop(path)
-        iso = EXIFHelper.get_iso(path)
-        shutter = EXIFHelper.get_shutter_speed(path)
-        rating = EXIFHelper.get_rating(path)
-        dt = EXIFHelper.get_datetime_original(path)
-        subsec = EXIFHelper.get_subsec_time(path)
-        self.exif_cache[path] = {
-            'fstop': fstop,
-            'iso': iso,
-            'shutter': shutter,
-            'rating': rating,
-            'datetime': dt,
-            'subsec': subsec
-        }
+        with timed("cache_exif"):
+            fstop = EXIFHelper.get_fstop(path)
+            iso = EXIFHelper.get_iso(path)
+            shutter = EXIFHelper.get_shutter_speed(path)
+            rating = EXIFHelper.get_rating(path)
+            dt = EXIFHelper.get_datetime_original(path)
+            subsec = EXIFHelper.get_subsec_time(path)
+            self.exif_cache[path] = {
+                'fstop': fstop,
+                'iso': iso,
+                'shutter': shutter,
+                'rating': rating,
+                'datetime': dt,
+                'subsec': subsec
+            }
         return self.exif_cache[path]
 
     def cancel(self):
@@ -106,7 +108,8 @@ class ImageSharpnessProcessor:
             for filename in unrated_images
         ]
 
-        results = run_pool(args, self.cancel_flag, self.progress_callback, "sharpness_check")
+        with timed("run_pool_s2"):
+            results = run_pool(args, self.cancel_flag, self.progress_callback, "sharpness_check")
         if results is None:
             print("DEBUG STAGE2: pool returned None (cancelled or error)")
             return []
@@ -154,7 +157,8 @@ class ImageSharpnessProcessor:
             for filename in images
         ]
 
-        results = run_pool(args, self.cancel_flag, self.progress_callback, "calculating_scores")
+        with timed("run_pool_scores"):
+            results = run_pool(args, self.cancel_flag, self.progress_callback, "calculating_scores")
         if results is None:
             print("DEBUG SCORES: pool returned None (cancelled or error)")
             return images
@@ -282,7 +286,8 @@ class ImageSharpnessProcessor:
                 return copied_count
             try:
                 dest_path = os.path.join(sharp_folder, os.path.basename(path))
-                shutil.copy(path, dest_path)
+                with timed("shutil_copy"):
+                    shutil.copy(path, dest_path)
                 copied_count += 1
                 print(f"Copied to Sharp: {os.path.basename(path)}")
                 if self.progress_callback:
@@ -308,7 +313,8 @@ class ImageSharpnessProcessor:
                 try:
                     source_path = os.path.join(self.folder, filename)
                     dest_path = os.path.join(rejected_folder, filename)
-                    shutil.copy(source_path, dest_path)
+                    with timed("shutil_copy"):
+                        shutil.copy(path, dest_path)
                     rejected_count += 1
                     print(f"Copied to Rejected: {filename}")
                     if self.progress_callback:
@@ -328,6 +334,11 @@ class ImageSharpnessProcessor:
         return copied_count
 
     def run(self, use_starcheck=True, use_laplaciancheck=True, group_bursts=True, output_folder=None, progress_callback=None, keep_rejected=False):
+        if progress_callback:
+            _cb = progress_callback
+            def progress_callback(*a, **k):
+                with timed("progress_cb"):
+                    return _cb(*a, **k)
         self.progress_callback = progress_callback
         self.stats['start_time'] = time.time()
         self.use_starcheck, self.use_laplaciancheck, self.group_bursts = use_starcheck, use_laplaciancheck, group_bursts
@@ -353,22 +364,29 @@ class ImageSharpnessProcessor:
             self.stats.setdefault('rejected_images', self.stats['total_images'] - self.stats.get('final_selection', 0))
             return self.stats
 
-        remaining_images = self.stage1_star_check(all_images) if use_starcheck else all_images
+        if use_starcheck:
+            with timed("stage1_star"):
+                remaining_images = self.stage1_star_check(all_images)
+        else:
+            remaining_images = all_images
         if not remaining_images or (self.cancel_flag and self.cancel_flag.is_set()):
             self.stats['end_time'] = time.time()
             self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
             self.stats.setdefault('rejected_images', self.stats['total_images'] - self.stats.get('final_selection', 0))
+            report()
             return self.stats
 
         print(f"DEBUG RUN: {len(remaining_images)} images remaining after stage 1")
 
         if use_laplaciancheck:
-            sharp_images = self.stage2_sharpness_check(remaining_images)
+            with timed("stage2_sharpness"):
+                sharp_images = self.stage2_sharpness_check(remaining_images)
         else:
             sharp_images = remaining_images
             self.stats['sharp_images'] = len(sharp_images)
             if group_bursts:
-                self.calculate_laplacian_scores(sharp_images)
+                with timed("calc_laplacian_scores"):
+                    self.calculate_laplacian_scores(sharp_images)
 
         print(f"DEBUG RUN: {len(sharp_images) if sharp_images else 0} images after stage 2")
 
@@ -376,16 +394,19 @@ class ImageSharpnessProcessor:
             self.stats['end_time'] = time.time()
             self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
             self.stats.setdefault('rejected_images', self.stats['total_images'] - self.stats.get('final_selection', 0))
+            report()
             return self.stats
 
         if group_bursts:
-            final_paths = self.stage3_burst_grouping(sharp_images)
+            with timed("stage3_bursts"):
+                final_paths = self.stage3_burst_grouping(sharp_images)
         else:
             final_paths = [os.path.join(self.folder, f) for f in sharp_images]
             self.stats['final_selection'] = len(final_paths)
 
         print(f"DEBUG RUN: {len(final_paths) if final_paths else 0} images after stage 3, copying now")
-        copied = self.copy_final_images(final_paths, output_folder, all_images, keep_rejected=keep_rejected)
+        with timed("copy_final"):
+            copied = self.copy_final_images(final_paths, output_folder, all_images, keep_rejected=keep_rejected)
 
         self.stats['end_time'] = time.time()
         self.stats['elapsed_time'] = self.stats['end_time'] - self.stats['start_time']
@@ -403,4 +424,5 @@ class ImageSharpnessProcessor:
             f"Time elapsed: {self.stats['elapsed_time']:.2f}s\n"
             f"Output: {output_folder}"
         )
+        report()
         return self.stats

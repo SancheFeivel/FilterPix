@@ -6,6 +6,8 @@ from ultralytics import YOLO
 from PIL import Image
 from PIL.ExifTags import TAGS
 
+from timing import timed, report
+
 class AISorter:
     def __init__(self, input_folder, solo, model_path="yolov8m.pt", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009, output_dir=None):
         # Normalize paths
@@ -109,14 +111,15 @@ class AISorter:
 
         try:
             # Single batched inference call — much faster than N individual calls
-            batch_results = self.model(
-                batch_paths,
-                classes=self.target_classes,
-                conf=self.conf,
-                imgsz=self.imgsz,
-                verbose=False,
-                stream=False,
-            )
+            with timed("yolo_inference"):
+                batch_results = self.model(
+                    batch_paths,
+                    classes=self.target_classes,
+                    conf=self.conf,
+                    imgsz=self.imgsz,
+                    verbose=False,
+                    stream=False,
+                )
         except Exception as e:
             print(f"Error running batch inference: {e}")
             return 0
@@ -124,7 +127,8 @@ class AISorter:
         processed = 0
         for image_path, result in zip(batch_paths, batch_results):
             try:
-                orientation = self.get_image_orientation(image_path)
+                with timed("orientation_exif"):
+                    orientation = self.get_image_orientation(image_path)
 
                 class_counts = {self.model.names[c]: 0 for c in self.target_classes}
                 person_areas = []
@@ -135,27 +139,28 @@ class AISorter:
                 img_height, img_width = result.orig_img.shape[:2]
                 img_area = img_width * img_height
 
-                for box in result.boxes:
-                    cls_id = int(box.cls[0])
-                    if cls_id not in self.target_classes:
-                        continue
+                with timed("box_parsing"):
+                    for box in result.boxes:
+                        cls_id = int(box.cls[0])
+                        if cls_id not in self.target_classes:
+                            continue
 
-                    class_name = self.model.names[cls_id]
-                    class_counts[class_name] += 1
+                        class_name = self.model.names[cls_id]
+                        class_counts[class_name] += 1
 
-                    x_min, y_min, x_max, y_max = box.xyxy[0].tolist()
-                    area_norm = ((x_max - x_min) * (y_max - y_min)) / img_area
+                        x_min, y_min, x_max, y_max = box.xyxy[0].tolist()
+                        area_norm = ((x_max - x_min) * (y_max - y_min)) / img_area
 
-                    if cls_id == 0:
-                        person_areas.append(area_norm)
+                        if cls_id == 0:
+                            person_areas.append(area_norm)
 
-                    for cat, class_ids in self.categories.items():
-                        if cls_id in class_ids:
-                            category_area_sums[cat] += area_norm
-                            category_counts[cat] += 1
-                            if area_norm > category_largest_areas[cat]:
-                                category_largest_areas[cat] = area_norm
-                            break
+                        for cat, class_ids in self.categories.items():
+                            if cls_id in class_ids:
+                                category_area_sums[cat] += area_norm
+                                category_counts[cat] += 1
+                                if area_norm > category_largest_areas[cat]:
+                                    category_largest_areas[cat] = area_norm
+                                break
 
                 total_count = sum(category_counts.values())
                 total_area = sum(category_area_sums.values())
@@ -174,7 +179,8 @@ class AISorter:
                 self._makedirs_cached(dest_folder)
 
                 dest_path = os.path.join(dest_folder, os.path.basename(image_path))
-                shutil.copyfile(image_path, dest_path)
+                with timed("copy_file"):
+                    shutil.copyfile(image_path, dest_path)
                 processed += 1
 
             except Exception as e:
@@ -283,6 +289,8 @@ class AISorter:
                 )
 
         self.total_time = time.time() - self.start_time
+
+        report()
 
         return {
             "total_images": total_images,

@@ -26,18 +26,23 @@ def process_image_sharpness(folder, filename, base_blur, tolerance, exif_cache):
     path = os.path.join(folder, filename)
     image = None
     pid = os.getpid()
+    t_start = time.perf_counter()
 
     print(f"DEBUG WORKER [{pid}]: starting {filename}")
 
     try:
         print(f"DEBUG WORKER [{pid}]: reading image {filename}")
+        t = time.perf_counter()
         image = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        t_read = time.perf_counter() - t
 
         if image is None:
             print(f"DEBUG WORKER [{pid}]: ERROR cv2.imread returned None for {filename}")
             return None
 
+        t = time.perf_counter()
         image = ImageAnalyzer.resize_short_side(image, 720)
+        t_resize = time.perf_counter() - t
         print(f"DEBUG WORKER [{pid}]: image loaded {filename} shape={image.shape} dtype={image.dtype}")
 
         exif_data = exif_cache.get(path)
@@ -46,11 +51,19 @@ def process_image_sharpness(folder, filename, base_blur, tolerance, exif_cache):
             return None
 
         print(f"DEBUG WORKER [{pid}]: running is_sharp for {filename} fstop={exif_data.get('fstop')}")
+        t = time.perf_counter()
         is_sharp, laplacian = ImageAnalyzer.is_sharp(
             image, path, base_blur, tolerance, exif_data
         )
+        t_sharp = time.perf_counter() - t
 
+        t_total = time.perf_counter() - t_start
         print(f"DEBUG WORKER [{pid}]: done {filename} is_sharp={is_sharp} laplacian={laplacian:.2f}")
+        print(
+            f"TIMING WORKER [{pid}] {filename}: "
+            f"read={t_read*1000:.1f}ms resize={t_resize*1000:.1f}ms "
+            f"is_sharp={t_sharp*1000:.1f}ms total={t_total*1000:.1f}ms"
+        )
         return filename, is_sharp, laplacian
 
     except Exception as e:
