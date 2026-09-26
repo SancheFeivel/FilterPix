@@ -3,6 +3,10 @@ import sys
 import time
 import shutil
 import multiprocessing
+
+os.environ.setdefault('OMP_NUM_THREADS', str(max(1, (os.cpu_count() or 4) // 2)))
+os.environ.setdefault('ORT_NUM_THREADS', os.environ['OMP_NUM_THREADS'])
+
 from ultralytics import YOLO
 from PIL import Image
 from PIL.ExifTags import TAGS
@@ -17,6 +21,14 @@ def _resolve_model_path(filename):
     the executable (added via the .spec 'datas') so the app stays fully
     offline -- otherwise ultralytics would try to download the weights on
     first run, which won't work without internet access.
+
+    NOTE: filename is now expected to be a YOLO26 .onnx export (e.g.
+    "yolo26m.onnx") rather than a raw .pt checkpoint. Ultralytics' YOLO()
+    auto-detects the backend from the extension, so nothing else here
+    needs to change -- just make sure the .onnx file is:
+      1) generated once via `YOLO("yolo26m.pt").export(format="onnx", ...)`
+      2) added to the PyInstaller .spec `datas` list so it gets bundled
+      3) `onnxruntime` (or `onnxruntime-gpu`) is installed in the environment
     """
     if getattr(sys, 'frozen', False):
         bundled = os.path.join(sys._MEIPASS, filename)
@@ -25,7 +37,7 @@ def _resolve_model_path(filename):
     return filename
 
 class AISorter:
-    def __init__(self, input_folder, solo, model_path="yolov8m.pt", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009, output_dir=None):
+    def __init__(self, input_folder, solo, model_path="yolo26m.onnx", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009, output_dir=None):
         # Normalize paths
         input_folder = os.path.normpath(input_folder)
         if output_dir:
@@ -93,6 +105,7 @@ class AISorter:
         self.supported_extensions = ('.jpg', '.jpeg', '.png')
 
         print("Using device:", self.model.device)
+        print(f"ORT threads: OMP={os.environ.get('OMP_NUM_THREADS')} ORT={os.environ.get('ORT_NUM_THREADS')}")
 
     def cancel(self):
         if self.cancel_flag:
@@ -118,7 +131,15 @@ class AISorter:
             return []
 
     def get_image_orientation(self, img_path):
-        """Determine if image is portrait or landscape (single open, no EXIF redundancy)."""
+        """
+        Determine if image is portrait or landscape.
+        NOTE: still a separate PIL open from YOLO's own internal cv2 decode
+        of the same file -- effectively a second read per image. Left as-is
+        because EXIF orientation isn't exposed through ultralytics' result
+        object. If this shows up meaningfully in the TIMING report
+        (orientation_exif), swap to a lightweight EXIF-only reader (e.g.
+        piexif) instead of a full PIL Image.open() + decode.
+        """
         try:
             with Image.open(img_path) as image:
                 width, height = image.size
@@ -290,8 +311,13 @@ class AISorter:
 
     def process_images_singlethreaded(self, progress_callback=None, batch_size=8):
         """
-        Process images in batches.  batch_size=8 is a good default; increase
-        to 16 if VRAM allows, decrease to 4 if you hit OOM errors.
+        Process images in batches.
+
+        batch_size=8 is a carryover from GPU-style batching. On CPU-only
+        ONNX Runtime inference, batching often gives little or no speedup
+        (no SIMD/parallel lane win like a GPU gets) and just adds memory
+        overhead. Benchmark 1 / 4 / 8 on your actual target hardware --
+        don't assume 8 is optimal here.
         """
         self.progress_callback = progress_callback
         self.start_time = time.time()
@@ -330,9 +356,9 @@ class AISorter:
 
 def main(folder, output=None, mode="fast", solo_process=None, cancel_flag=None, progress_callback=None):
     if mode == "fast":
-        config = {"model_path": "yolov8n.pt", "conf": 0.4, "imgsz": 416}
+        config = {"model_path": "yolo26n.onnx", "conf": 0.4, "imgsz": 416}
     elif mode == "accurate":
-        config = {"model_path": "yolov8m.pt", "conf": 0.4, "imgsz": 640}
+        config = {"model_path": "yolo26m.onnx", "conf": 0.4, "imgsz": 512}
     else:
         raise ValueError("Mode must be either 'fast' or 'accurate'")
 
