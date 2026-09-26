@@ -13,9 +13,9 @@ temp_*.py
 *.log
 
 # model weights
-*.pt
-*.pth
-*.onnx
+# *.pt
+# *.pth
+# *.onnx
 
 *.spec
 BUILD.md
