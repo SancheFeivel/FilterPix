@@ -16,3 +16,7 @@ temp_*.py
 *.pt
 *.pth
 *.onnx
+
+*.spec
+BUILD.md
+dist/
