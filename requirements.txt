@@ -1,5 +1,9 @@
-opencv-python
+# opencv-python 5.x removed cv2.CascadeClassifier and stopped bundling the
+# Haar cascade XML files that logic/face_detector.py depends on. Pin to the
+# 4.x line until face_detector.py is ported to the new API.
+opencv-python<5
 Pillow
 numpy
 ultralytics
 pywebview>=5.0
+pyinstaller>=6.0

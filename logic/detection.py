@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import shutil
 import multiprocessing
@@ -8,6 +9,21 @@ from PIL.ExifTags import TAGS
 
 from timing import timed, report
 
+
+def _resolve_model_path(filename):
+    """
+    In dev mode, return the bare filename so ultralytics resolves/downloads
+    it as usual. When frozen (PyInstaller), prefer a copy bundled next to
+    the executable (added via the .spec 'datas') so the app stays fully
+    offline -- otherwise ultralytics would try to download the weights on
+    first run, which won't work without internet access.
+    """
+    if getattr(sys, 'frozen', False):
+        bundled = os.path.join(sys._MEIPASS, filename)
+        if os.path.exists(bundled):
+            return bundled
+    return filename
+
 class AISorter:
     def __init__(self, input_folder, solo, model_path="yolov8m.pt", target_classes=None, conf=0.4, imgsz=320, subject_threshold=0.009, output_dir=None):
         # Normalize paths
@@ -16,15 +32,29 @@ class AISorter:
             output_dir = os.path.normpath(output_dir)
         
         self.original_input_folder = input_folder
-        
-        if output_dir:
-            self.input_folder = os.path.join(output_dir, "Sharp")
-        elif solo:
+
+        # Where to READ source images from:
+        #  - solo (no filters ran before this) -> always the original source
+        #    folder, whether or not a custom output_dir was chosen, since no
+        #    "Sharp" folder was ever produced to read from.
+        #  - otherwise -> the Sharp folder produced by the sharpness/burst
+        #    stage, either under the custom output_dir or under input_folder.
+        if solo:
             self.input_folder = input_folder
+        elif output_dir:
+            self.input_folder = os.path.join(output_dir, "Sharp")
         else:
             self.input_folder = os.path.join(input_folder, "Sharp")
-        
-        self.output_base = os.path.join(self.input_folder, "Sorted")
+
+        # Where to WRITE the "Sorted" results:
+        #  - solo + custom output_dir -> output_dir/Sorted (there is no Sharp
+        #    folder to nest it under).
+        #  - otherwise -> nested under wherever we're reading images from,
+        #    matching the original behavior.
+        if solo and output_dir:
+            self.output_base = os.path.join(output_dir, "Sorted")
+        else:
+            self.output_base = os.path.join(self.input_folder, "Sorted")
         
         self.model = YOLO(model_path)
         self.conf = conf
@@ -305,6 +335,8 @@ def main(folder, output=None, mode="fast", solo_process=None, cancel_flag=None, 
         config = {"model_path": "yolov8m.pt", "conf": 0.4, "imgsz": 640}
     else:
         raise ValueError("Mode must be either 'fast' or 'accurate'")
+
+    config["model_path"] = _resolve_model_path(config["model_path"])
 
     sorter = AISorter(
         input_folder=folder,

@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -448,4 +449,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Required for the 'spawn' multiprocessing pool (logic/pool_worker.py)
+    # to work once this is frozen into a Windows .exe -- without this,
+    # every worker process would re-launch the whole GUI instead of
+    # running as a worker.
+    multiprocessing.freeze_support()
     main()
