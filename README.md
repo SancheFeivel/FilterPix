@@ -50,7 +50,7 @@ Original image files are never modified.
 
 ## Documentation
 
-- User Manual: `user manual.txt`  
+- User Manual: `user manual.md`  
 - Detailed settings, workflows, and filter behavior are documented in the manual  
 
 ---
@@ -64,5 +64,3 @@ Original image files are never modified.
 - Designed for offline execution  
 
 ---
-
-
